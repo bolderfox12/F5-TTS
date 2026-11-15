@@ -22,6 +22,89 @@
 - **2025/03/12**: 🔥 F5-TTS v1 base model with better training and inference performance. [Few demo](https://swivid.github.io/F5-TTS_updates).
 - **2024/10/08**: F5-TTS & E2 TTS base models on [🤗 Hugging Face](https://huggingface.co/SWivid/F5-TTS), [🤖 Model Scope](https://www.modelscope.cn/models/SWivid/F5-TTS_Emilia-ZH-EN), [🟣 Wisemodel](https://wisemodel.cn/models/SJTU_X-LANCE/F5-TTS_Emilia-ZH-EN).
 
+## F5 Studio local — narração, legendas e ferramentas de áudio
+
+A branch `studio/local-tools` amplia o estúdio para uso no próprio PC, sem chaves
+ou chamadas a APIs pagas. Inclui as atualizações das branches anteriores.
+Os modelos são baixados na primeira utilização e o processamento de voz/texto
+acontece localmente. O acesso às ferramentas continua em `http://127.0.0.1:7862`.
+
+Com o ambiente Python/PyTorch preparado:
+
+```bash
+git fetch origin
+git switch studio/local-tools
+python -m pip install -e ".[studio]"
+f5-tts_studio
+```
+
+No Windows sem ativar o ambiente: use `.\.venv\Scripts\python.exe -m pip install -e ".[studio]"`
+e depois `.\.venv\Scripts\f5-tts_studio.exe`.
+
+### Ferramentas locais disponíveis
+
+| Área | Fluxo |
+| --- | --- |
+| Projetos de narração | Cole o roteiro, separado por linhas em branco; escolha vozes por trecho, edite, reordene, defina pausas, gere somente o que mudou e junte em WAV + SRT. |
+| Modelos no roteiro | Aplique opcionalmente um checkpoint do seu projeto treinado. Mudanças no checkpoint, texto, voz, velocidade ou pronúncia invalidam o áudio anterior para nova exportação. |
+| Transcrição e legendas | Envie áudio, selecione Whisper Small ou Turbo, revise cada trecho e exporte TXT/SRT. |
+| Tradução de legendas | Use NLLB local para português, inglês, espanhol, francês ou alemão. A versão original é preservada e a tradução mantém os tempos originais. |
+| Regravar áudio | Carregue texto revisado/traduzido, escolha uma voz e opcionalmente um checkpoint e gere outra narração. Não preserva exatamente atuação, emoção, duração ou sincronização do original. |
+| Ferramentas de áudio | FFmpeg local para converter WAV/MP3, equilibrar volume, reduzir ruído contínuo e cortar silêncios. A redução simples de ruído não separa voz e música com IA. |
+| Pronúncia | Em Configurações, informe uma regra por linha, como `IA = inteligência artificial`. A leitura é substituída na geração; o roteiro original permanece salvo. |
+
+No editor, clique em um trecho para editar e **salve antes de gerar**. O botão
+**Parar depois do trecho atual** mantém os trechos prontos. Ao continuar, são gerados
+somente os que estiverem pendentes. A exportação inclui pausas entre os trechos;
+as legendas indicam intervalos de trechos, sem alinhamento palavra por palavra.
+Projetos, transcrições, traduções, avaliações e preferências persistem no workspace.
+
+### Modelos, downloads e funcionamento sem internet
+
+- F5-TTS continua responsável pela síntese, referência de voz e ajuste fino.
+- `openai/whisper-small`: transcrição local mais leve.
+- `openai/whisper-large-v3-turbo`: alternativa mais pesada, útil para comparação.
+- `facebook/nllb-200-distilled-600M`: tradução local. O primeiro uso baixa pesos e tokenizador.
+- FFmpeg precisa estar instalado e disponível no PATH para as ferramentas de áudio.
+
+As opções de download em Configurações podem exigir somente arquivos já no cache
+para as duas novas ferramentas de transcrição e tradução. Para execução totalmente
+sem rede, baixe previamente todos os modelos que pretende usar, inclusive os de
+síntese/vocoder e os do treinamento. Depois, antes de iniciar o programa:
+
+```bash
+# Linux/macOS
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 f5-tts_studio
+```
+
+```powershell
+# Windows PowerShell
+$env:HF_HUB_OFFLINE="1"
+$env:TRANSFORMERS_OFFLINE="1"
+.\.venv\Scripts\f5-tts_studio.exe
+```
+
+Modelos ausentes no cache precisam ser baixados antes de usar esse modo.
+Não há cobrança de API neste programa. As licenças de cada modelo continuam
+aplicáveis: os pesos originais F5-TTS e o NLLB têm restrições de uso comercial.
+Referências: [Whisper Turbo](https://huggingface.co/openai/whisper-large-v3-turbo),
+[NLLB-200](https://huggingface.co/facebook/nllb-200-distilled-600M).
+
+### Escopo e validação
+
+Este é um estúdio local com identidade própria. Ainda não oferece conversão de voz
+que preserve a atuação, dublagem de vídeo sincronizada/lip-sync, criação de vozes
+por descrição, música/efeitos gerados por IA ou agentes de voz conversacionais.
+Esses recursos exigem modelos e integrações adicionais. A qualidade do português
+continua dependendo do checkpoint F5-TTS e dos dados usados no ajuste fino.
+
+Testes locais usam modelos simulados para orquestração de ASR, tradução e síntese;
+a conversão WAV/MP3 é executada com FFmpeg real. São verificados revisão,
+preservação dos originais, exportação SRT, múltiplas vozes, invalidação de trechos,
+parada/retomada e respostas HTTP das nove páginas. Não foi executado download de
+Whisper/NLLB, validação de qualidade com pesos reais ou treinamento completo em GPU.
+A conferência visual no navegador continua pendente.
+
 ## Novo F5 Studio — interface NiceGUI
 
 A branch `studio/nicegui` reúne criação de áudio, vozes salvas, treinamento guiado,
