@@ -210,63 +210,65 @@ def infer(
 
 
 with gr.Blocks() as app_tts:
-    gr.Markdown("# Batched TTS")
-    ref_audio_input = gr.Audio(label="Reference Audio", type="filepath")
+    gr.Markdown("### 01 · Voz de referência\nEnvie ou grave uma amostra limpa, de preferência com até 12 segundos.")
+    ref_audio_input = gr.Audio(label="Áudio de referência", type="filepath")
+    gr.Markdown("### 02 · Seu roteiro")
     with gr.Row():
         gen_text_input = gr.Textbox(
-            label="Text to Generate",
+            label="Texto para narrar",
+            placeholder="Digite ou cole o texto que deseja transformar em voz…",
             lines=10,
             max_lines=40,
             scale=4,
         )
-        gen_text_file = gr.File(label="Load Text to Generate from File (.txt)", file_types=[".txt"], scale=1)
-    generate_btn = gr.Button("Synthesize", variant="primary")
-    with gr.Accordion("Advanced Settings", open=True) as adv_settn:
+        gen_text_file = gr.File(label="Importar roteiro (.txt)", file_types=[".txt"], scale=1)
+    generate_btn = gr.Button("Gerar áudio", variant="primary", elem_id="studio-generate")
+    with gr.Accordion("Ajustes avançados", open=True) as adv_settn:
         with gr.Row():
             ref_text_input = gr.Textbox(
-                label="Reference Text",
-                info="Leave blank to automatically transcribe the reference audio. If you enter text or upload a file, it will override automatic transcription.",
+                label="Transcrição da referência",
+                info="Deixe vazio para transcrever automaticamente. O texto informado substitui a transcrição automática.",
                 lines=2,
                 scale=4,
             )
-            ref_text_file = gr.File(label="Load Reference Text from File (.txt)", file_types=[".txt"], scale=1)
+            ref_text_file = gr.File(label="Importar transcrição (.txt)", file_types=[".txt"], scale=1)
         with gr.Row():
             randomize_seed = gr.Checkbox(
-                label="Randomize Seed",
-                info="Check to use a random seed for each generation. Uncheck to use the seed specified.",
+                label="Variar a geração",
+                info="Desmarque para reutilizar a semente e comparar resultados.",
                 value=True,
                 scale=3,
             )
             seed_input = gr.Number(show_label=False, value=0, precision=0, scale=1)
             with gr.Column(scale=4):
                 remove_silence = gr.Checkbox(
-                    label="Remove Silences",
-                    info="If undesired long silence(s) produced, turn on to automatically detect and crop.",
+                    label="Remover silêncios",
+                    info="Detecta e corta silêncios longos do áudio gerado.",
                     value=False,
                 )
         speed_slider = gr.Slider(
-            label="Speed",
+            label="Velocidade",
             minimum=0.3,
             maximum=2.0,
             value=1.0,
             step=0.1,
-            info="Adjust the speed of the audio.",
+            info="1,0 mantém a velocidade padrão.",
         )
         nfe_slider = gr.Slider(
-            label="NFE Steps",
+            label="Etapas de geração",
             minimum=4,
             maximum=64,
             value=32,
             step=2,
-            info="Set the number of denoising steps.",
+            info="Mais etapas podem aumentar o tempo de processamento.",
         )
         cross_fade_duration_slider = gr.Slider(
-            label="Cross-Fade Duration (s)",
+            label="Transição entre trechos (s)",
             minimum=0.0,
             maximum=1.0,
             value=0.15,
             step=0.01,
-            info="Set the duration of the cross-fade between audio clips.",
+            info="Suaviza a passagem entre os trechos de áudio.",
         )
 
     def collapse_accordion():
@@ -280,8 +282,10 @@ with gr.Blocks() as app_tts:
         outputs=adv_settn,
     )
 
-    audio_output = gr.Audio(label="Synthesized Audio")
-    spectrogram_output = gr.Image(label="Spectrogram")
+    gr.Markdown("### 03 · Resultado")
+    audio_output = gr.Audio(label="Áudio gerado")
+    with gr.Accordion("Análise do áudio", open=False):
+        spectrogram_output = gr.Image(label="Espectrograma")
 
     @gpu_decorator
     def basic_tts(
@@ -434,7 +438,7 @@ with gr.Blocks() as app_multistyle:
                     show_label=False, minimum=0.3, maximum=2.0, value=1.0, step=0.1, info="Adjust the speed"
                 )
         with gr.Column(scale=1, min_width=160):
-            regular_ref_text_file = gr.File(label="Load Reference Text from File (.txt)", file_types=[".txt"])
+            regular_ref_text_file = gr.File(label="Importar transcrição (.txt)", file_types=[".txt"])
 
     # Regular speech type (max 100)
     max_speech_types = 100
@@ -456,9 +460,9 @@ with gr.Blocks() as app_multistyle:
                 insert_btn = gr.Button("Insert Label", variant="secondary")
                 delete_btn = gr.Button("Delete Type", variant="stop")
             with gr.Column(scale=3):
-                audio_input = gr.Audio(label="Reference Audio", type="filepath")
+                audio_input = gr.Audio(label="Áudio de referência", type="filepath")
             with gr.Column(scale=3):
-                ref_text_input = gr.Textbox(label="Reference Text", lines=4)
+                ref_text_input = gr.Textbox(label="Transcrição da referência", lines=4)
                 with gr.Row():
                     seed_input = gr.Slider(
                         show_label=False, minimum=-1, maximum=999, value=-1, step=1, info="Seed. -1 for random"
@@ -467,7 +471,7 @@ with gr.Blocks() as app_multistyle:
                         show_label=False, minimum=0.3, maximum=2.0, value=1.0, step=0.1, info="Adjust the speed"
                     )
             with gr.Column(scale=1, min_width=160):
-                ref_text_file_input = gr.File(label="Load Reference Text from File (.txt)", file_types=[".txt"])
+                ref_text_file_input = gr.File(label="Importar transcrição (.txt)", file_types=[".txt"])
         speech_type_rows.append(row)
         speech_type_names.append(name_input)
         speech_type_audios.append(audio_input)
@@ -530,13 +534,13 @@ with gr.Blocks() as app_multistyle:
     # Text input for the prompt
     with gr.Row():
         gen_text_input_multistyle = gr.Textbox(
-            label="Text to Generate",
+            label="Texto para narrar",
             lines=10,
             max_lines=40,
             scale=4,
             placeholder="Enter the script with speaker names (or emotion types) at the start of each block, e.g.:\n\n{Regular} Hello, I'd like to order a sandwich please.\n{Surprised} What do you mean you're out of bread?\n{Sad} I really wanted a sandwich though...\n{Angry} You know what, darn you and your little shop!\n{Whisper} I'll just go back home and cry now.\n{Shouting} Why me?!",
         )
-        gen_text_file_multistyle = gr.File(label="Load Text to Generate from File (.txt)", file_types=[".txt"], scale=1)
+        gen_text_file_multistyle = gr.File(label="Importar roteiro (.txt)", file_types=[".txt"], scale=1)
 
     def make_insert_speech_type_fn(index):
         def insert_speech_type_fn(current_text, speech_type_name, speech_type_seed, speech_type_speed):
@@ -562,7 +566,7 @@ with gr.Blocks() as app_multistyle:
             outputs=gen_text_input_multistyle,
         )
 
-    with gr.Accordion("Advanced Settings", open=True):
+    with gr.Accordion("Ajustes avançados", open=True):
         with gr.Row():
             with gr.Column():
                 show_cherrypick_multistyle = gr.Checkbox(
@@ -572,7 +576,7 @@ with gr.Blocks() as app_multistyle:
                 )
             with gr.Column():
                 remove_silence_multistyle = gr.Checkbox(
-                    label="Remove Silences",
+                    label="Remover silêncios",
                     info="Turn on to automatically detect and crop long silences.",
                     value=True,
                 )
@@ -581,7 +585,7 @@ with gr.Blocks() as app_multistyle:
     generate_multistyle_btn = gr.Button("Generate Multi-Style Speech", variant="primary")
 
     # Output audio
-    audio_output_multistyle = gr.Audio(label="Synthesized Audio")
+    audio_output_multistyle = gr.Audio(label="Áudio gerado")
 
     # Used seed gallery
     cherrypick_interface_multistyle = gr.Textbox(
@@ -796,29 +800,27 @@ Have a conversation with an AI using your reference voice!
     with chat_interface_container:
         with gr.Row():
             with gr.Column():
-                ref_audio_chat = gr.Audio(label="Reference Audio", type="filepath")
+                ref_audio_chat = gr.Audio(label="Áudio de referência", type="filepath")
             with gr.Column():
-                with gr.Accordion("Advanced Settings", open=False):
+                with gr.Accordion("Ajustes avançados", open=False):
                     with gr.Row():
                         ref_text_chat = gr.Textbox(
-                            label="Reference Text",
+                            label="Transcrição da referência",
                             info="Optional: Leave blank to auto-transcribe",
                             lines=2,
                             scale=3,
                         )
-                        ref_text_file_chat = gr.File(
-                            label="Load Reference Text from File (.txt)", file_types=[".txt"], scale=1
-                        )
+                        ref_text_file_chat = gr.File(label="Importar transcrição (.txt)", file_types=[".txt"], scale=1)
                     with gr.Row():
                         randomize_seed_chat = gr.Checkbox(
-                            label="Randomize Seed",
+                            label="Variar a geração",
                             value=True,
                             info="Uncheck to use the seed specified.",
                             scale=3,
                         )
                         seed_input_chat = gr.Number(show_label=False, value=0, precision=0, scale=1)
                     remove_silence_chat = gr.Checkbox(
-                        label="Remove Silences",
+                        label="Remover silêncios",
                         value=True,
                     )
                     system_prompt_chat = gr.Textbox(
@@ -957,23 +959,29 @@ with gr.Blocks() as app_credits:
 """)
 
 
-with gr.Blocks() as app:
-    gr.Markdown(
-        f"""
-# F5-TTS Demo Space
+STUDIO_CSS = files("f5_tts").joinpath("infer/studio.css").read_text(encoding="utf-8")
+STUDIO_THEME = gr.themes.Soft(primary_hue="teal", secondary_hue="slate", neutral_hue="slate")
 
-This is {"a local web UI for [F5-TTS](https://github.com/SWivid/F5-TTS)" if not USING_SPACES else "an online demo for [F5-TTS](https://github.com/SWivid/F5-TTS)"} with advanced batch processing support. This app supports the following TTS models:
 
-* [F5-TTS](https://arxiv.org/abs/2410.06885) (A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching)
-* [E2 TTS](https://arxiv.org/abs/2406.18009) (Embarrassingly Easy Fully Non-Autoregressive Zero-Shot TTS)
-
-The checkpoints currently support English and Chinese.
-
-If you're having issues, try converting your reference audio to WAV or MP3, clipping it to 12s with  ✂  in the bottom right corner (otherwise might have non-optimal auto-trimmed result).
-
-**NOTE: Reference text will be automatically transcribed with Whisper if not provided. For best results, keep your reference clips short (<12s). Ensure the audio is fully uploaded before generating.**
-"""
-    )
+with gr.Blocks(title="F5-TTS · Estúdio de voz") as app:
+    gr.HTML("""
+    <header id="studio-hero">
+      <div class="studio-eyebrow">F5-TTS / VOICE WORKSPACE</div>
+      <h1>Transforme texto em voz.</h1>
+      <p>Um espaço para criar, experimentar e dar voz às suas ideias.</p>
+      <div class="studio-tags"><span>Áudio de referência</span><span>Múltiplas vozes</span><span>Controle de geração</span></div>
+    </header>
+    """)
+    with gr.Accordion("Antes de começar", open=False):
+        gr.Markdown(
+            "Use uma referência limpa em WAV ou MP3, preferencialmente com até 12 segundos. "
+            "Aguarde o envio completo antes de gerar. Sem transcrição informada, o Whisper "
+            "transcreve a referência automaticamente.\n\n"
+            "**Idiomas:** os checkpoints padrão são voltados a inglês e chinês. "
+            "A interface em português não adiciona suporte de idioma ao modelo.\n\n"
+            "[Projeto original](https://github.com/SWivid/F5-TTS) · "
+            "Código MIT; modelos pré-treinados CC-BY-NC."
+        )
 
     last_used_custom = files("f5_tts").joinpath("infer/.cache/last_used_custom_model_info_v1.txt")
 
@@ -1011,11 +1019,11 @@ If you're having issues, try converting your reference audio to WAV or MP3, clip
     with gr.Row():
         if not USING_SPACES:
             choose_tts_model = gr.Radio(
-                choices=[DEFAULT_TTS_MODEL, "E2-TTS", "Custom"], label="Choose TTS Model", value=DEFAULT_TTS_MODEL
+                choices=[DEFAULT_TTS_MODEL, "E2-TTS", "Custom"], label="Modelo de voz", value=DEFAULT_TTS_MODEL
             )
         else:
             choose_tts_model = gr.Radio(
-                choices=[DEFAULT_TTS_MODEL, "E2-TTS"], label="Choose TTS Model", value=DEFAULT_TTS_MODEL
+                choices=[DEFAULT_TTS_MODEL, "E2-TTS"], label="Modelo de voz", value=DEFAULT_TTS_MODEL
             )
         custom_ckpt_path = gr.Dropdown(
             choices=[DEFAULT_TTS_MODEL_CFG[0]],
@@ -1089,7 +1097,7 @@ If you're having issues, try converting your reference audio to WAV or MP3, clip
 
     gr.TabbedInterface(
         [app_tts, app_multistyle, app_chat, app_credits],
-        ["Basic-TTS", "Multi-Speech", "Voice-Chat", "Credits"],
+        ["Estúdio de voz", "Múltiplas vozes", "Conversa por voz", "Créditos"],
     )
 
 
@@ -1122,6 +1130,8 @@ def main(port, host, share, api, root_path, inbrowser):
     global app
     print("Starting app...")
     app.queue(api_open=api).launch(
+        theme=STUDIO_THEME,
+        css=STUDIO_CSS,
         server_name=host,
         server_port=port,
         share=share,
@@ -1134,4 +1144,4 @@ if __name__ == "__main__":
     if not USING_SPACES:
         main()
     else:
-        app.queue().launch()
+        app.queue().launch(theme=STUDIO_THEME, css=STUDIO_CSS)
