@@ -1,6 +1,5 @@
 # ruff: noqa: E402
 # Above allows ruff to ignore E402: module level import not at top of file
-
 import gc
 import json
 import os
@@ -15,9 +14,10 @@ import gradio as gr
 import numpy as np
 import soundfile as sf
 import torch
-import torchaudio
 from cached_path import cached_path
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from f5_tts.audio import load_audio
 
 
 try:
@@ -196,7 +196,7 @@ def infer(
         try:
             sf.write(temp_path, final_wave, final_sample_rate)
             remove_silence_for_generated_wav(f.name)
-            final_wave, _ = torchaudio.load(f.name)
+            final_wave, _ = load_audio(f.name)
         finally:
             os.unlink(temp_path)
         final_wave = final_wave.squeeze().cpu().numpy()
