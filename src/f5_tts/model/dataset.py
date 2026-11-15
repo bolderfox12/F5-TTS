@@ -10,6 +10,7 @@ from torch import nn
 from torch.utils.data import Dataset, Sampler
 from tqdm import tqdm
 
+from f5_tts.audio import load_audio
 from f5_tts.model.modules import MelSpec
 from f5_tts.model.utils import default
 
@@ -142,7 +143,7 @@ class CustomDataset(Dataset):
         if self.preprocessed_mel:
             mel_spec = torch.tensor(row["mel_spec"])
         else:
-            audio, source_sample_rate = torchaudio.load(audio_path)
+            audio, source_sample_rate = load_audio(audio_path)
 
             # make sure mono input
             if audio.shape[0] > 1:
