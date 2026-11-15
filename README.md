@@ -1,5 +1,25 @@
 # F5-TTS: A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching
 
+## Versão local recomendada — F5 Studio
+
+Para usar o conjunto mais recente de ferramentas no seu PC, escolha a branch **`studio/local-tools`** ([PR #5](https://github.com/bolderfox12/F5-TTS/pull/5)). O código continua em revisão; a `main` ainda não recebeu todas as implementações.
+
+Inclui projetos com múltiplas vozes, edição por trechos, transcrição e tradução local de legendas, regravação por texto, ferramentas WAV/MP3 e dicionário de pronúncia. Não utiliza APIs pagas. Os modelos precisam de um download inicial.
+
+Com o ambiente Python/PyTorch preparado:
+
+```bash
+git fetch origin
+git switch studio/local-tools
+python -m pip install -e ".[studio]"
+f5-tts_studio
+```
+
+Abra `http://127.0.0.1:7862`. Veja as [instruções completas e o escopo da versão local](https://github.com/bolderfox12/F5-TTS/tree/studio/local-tools#f5-studio-local--narração-legendas-e-ferramentas-de-áudio).
+
+Os 30 testes locais passaram; os modelos completos/GPU e o visual no navegador ainda precisam de validação. Conversão de voz preservando atuação, dublagem de vídeo sincronizada, música/SFX por IA e agentes conversacionais ainda não estão implementados.
+
+
 [![python](https://img.shields.io/badge/Python-3.15.2-brightgreen)](https://github.com/bolderfox12/F5-TTS/tree/python/latest-stable)
 [![arXiv](https://img.shields.io/badge/arXiv-2410.06885-b31b1b.svg?logo=arXiv)](https://arxiv.org/abs/2410.06885)
 [![demo](https://img.shields.io/badge/GitHub-Demo-orange.svg)](https://swivid.github.io/F5-TTS/)
