@@ -30,10 +30,10 @@ from importlib.resources import files
 from pathlib import Path
 
 import soundfile as sf
-import torchaudio
 from datasets.arrow_writer import ArrowWriter
 from tqdm import tqdm
 
+from f5_tts.audio import audio_info
 from f5_tts.model.utils import convert_char_to_pinyin
 
 
@@ -195,13 +195,13 @@ def get_audio_duration(audio_path, timeout=5):
             return float(duration_str)
         raise ValueError("Empty duration string from ffprobe.")
     except (subprocess.TimeoutExpired, subprocess.SubprocessError, ValueError) as e:
-        print(f"Warning: ffprobe failed for {audio_path} with error: {e}. Falling back to torchaudio.info.")
+        print(f"Warning: ffprobe failed for {audio_path} with error: {e}. Falling back to SoundFile metadata.")
 
     try:
-        info = torchaudio.info(audio_path)
+        info = audio_info(audio_path)
         if info.sample_rate > 0:
             return info.num_frames / info.sample_rate
-        raise ValueError("Invalid sample_rate from torchaudio.info.")
+        raise ValueError("Invalid sample_rate from audio metadata.")
     except Exception as e:
         raise RuntimeError(f"failed to get duration for {audio_path}: {e}")
 

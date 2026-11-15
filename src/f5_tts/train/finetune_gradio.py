@@ -21,7 +21,6 @@ import librosa
 import numpy as np
 import psutil
 import torch
-import torchaudio
 from cached_path import cached_path
 from datasets import Dataset as Dataset_
 from datasets.arrow_writer import ArrowWriter
@@ -29,9 +28,11 @@ from safetensors.torch import load_file, save_file
 from scipy.io import wavfile
 
 from f5_tts.api import F5TTS
+from f5_tts.audio import load_audio
 from f5_tts.device_utils import get_default_device
 from f5_tts.infer.utils_infer import transcribe
 from f5_tts.model.utils import convert_char_to_pinyin
+from f5_tts.train.guided_training import build_guided_training
 
 
 def _safe_project_path(base: str, name: str) -> str:
@@ -183,7 +184,7 @@ def load_settings(project_name):
 # Load metadata
 def get_audio_duration(audio_path):
     """Calculate the duration mono of an audio file."""
-    audio, sample_rate = torchaudio.load(audio_path)
+    audio, sample_rate = load_audio(audio_path)
     return audio.shape[1] / sample_rate
 
 
@@ -384,6 +385,7 @@ def start_training(
     if training_process is not None:
         return "Train run already!", gr.update(interactive=False), gr.update(interactive=True)
 
+    stop_signal = False
     yield "start train", gr.update(interactive=False), gr.update(interactive=False)
 
     # Command to run the training script with the specified arguments
@@ -578,8 +580,12 @@ def start_training(
 
         if training_process is None:
             text_info = "Train stopped !"
+        elif stop_signal:
+            text_info = "Treinamento interrompido."
+        elif training_process.returncode != 0:
+            text_info = f"Falha no treinamento (código {training_process.returncode}). Confira as mensagens acima."
         else:
-            text_info = "Train complete at end !"
+            text_info = "Treinamento concluído. Abra a etapa 5 para testar a nova versão."
 
     except Exception as e:  # Catch all exceptions
         # Ensure that we reset the training process variable in case of an error
@@ -758,7 +764,7 @@ def create_metadata(name_project, ch_tokenizer, progress=gr.Progress()):
     result = []
     error_files = []
     text_vocab_set = set()
-    for line in progress.tqdm(data.split("\n"), total=count):
+    for line in progress.tqdm(data.split("\n"), total=len(count)):
         sp_line = line.split("|")
         if len(sp_line) != 2:
             continue
@@ -1369,20 +1375,14 @@ def get_audio_select(file_sample):
 
 
 with gr.Blocks() as app:
-    gr.Markdown(
-        """
-# F5 TTS Automatic Finetune
+    gr.Markdown("""
+# Estúdio de treinamento · F5-TTS
+Abra **Comece aqui** para gravar exemplos, conferir o texto e ajustar sua voz em cinco etapas.
+Os controles técnicos continuam disponíveis nas abas avançadas.
 
-This is a local web UI for F5 TTS finetuning support. This app supports the following TTS models:
-
-* [F5-TTS](https://arxiv.org/abs/2410.06885) (A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching)
-* [E2 TTS](https://arxiv.org/abs/2406.18009) (Embarrassingly Easy Fully Non-Autoregressive Zero-Shot TTS)
-
-The pretrained checkpoints support English and Chinese.
-
-For tutorial and updates check here (https://github.com/SWivid/F5-TTS/discussions/143)
-"""
-    )
+O modelo não aprende automaticamente com o uso. Grave exemplos corretos e inicie o treino quando estiver pronto.
+Os checkpoints originais são voltados a inglês e chinês; outros idiomas podem exigir dados e ajustes adicionais.
+""")
 
     with gr.Row():
         projects, projects_selelect = get_list_projects()
@@ -1399,7 +1399,9 @@ For tutorial and updates check here (https://github.com/SWivid/F5-TTS/discussion
     bt_create.click(fn=create_data_project, inputs=[project_name, tokenizer_type], outputs=[cm_project])
 
     with gr.Tabs():
-        with gr.TabItem("Transcribe Data"):
+        with gr.TabItem("Comece aqui · Treinamento guiado"):
+            build_guided_training(sys.modules[__name__])
+        with gr.TabItem("Avançado · Transcrever"):
             gr.Markdown("""```plaintext 
 Skip this step if you have your dataset, metadata.csv, and a folder wavs with all the audio files.                 
 ```""")
@@ -1443,7 +1445,7 @@ Skip this step if you have your dataset, metadata.csv, and a folder wavs with al
                 outputs=[random_text_transcribe, random_audio_transcribe],
             )
 
-        with gr.TabItem("Vocab Check"):
+        with gr.TabItem("Avançado · Vocabulário"):
             gr.Markdown("""```plaintext 
 Check the vocabulary for fine-tuning Emilia_ZH_EN to ensure all symbols are included. For fine-tuning a new language.
 ```""")
@@ -1479,7 +1481,7 @@ Using the extended model, you can finetune to a new language that is missing sym
                 fn=vocab_extend, inputs=[cm_project, txt_extend, exp_name_extend], outputs=[txt_info_extend]
             )
 
-        with gr.TabItem("Prepare Data"):
+        with gr.TabItem("Avançado · Preparar"):
             gr.Markdown("""```plaintext 
 Skip this step if you have your dataset, raw.arrow, duration.json, and vocab.txt
 ```""")
@@ -1528,7 +1530,7 @@ Skip this step if you have your dataset, raw.arrow, duration.json, and vocab.txt
                 fn=get_random_sample_prepare, inputs=[cm_project], outputs=[random_text_prepare, random_audio_prepare]
             )
 
-        with gr.TabItem("Train Model"):
+        with gr.TabItem("Avançado · Treinar"):
             gr.Markdown("""```plaintext 
 The auto-setting is still experimental. Set a large value of epoch if not sure; and keep last N checkpoints if limited disk space.
 If you encounter a memory error, try reducing the batch size per GPU to a smaller number.
@@ -1761,7 +1763,7 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
                 outputs=outputs,
             )
 
-        with gr.TabItem("Test Model"):
+        with gr.TabItem("Avançado · Testar"):
             gr.Markdown("""```plaintext 
 Check the use_ema setting (True or False) for your model to see what works best for you. Set seed to -1 for random.
 ```""")
@@ -1823,7 +1825,7 @@ Check the use_ema setting (True or False) for your model to see what works best 
             bt_checkpoint_refresh.click(fn=get_checkpoints_project, inputs=[cm_project], outputs=[cm_checkpoint])
             cm_project.change(fn=get_checkpoints_project, inputs=[cm_project], outputs=[cm_checkpoint])
 
-        with gr.TabItem("Prune Checkpoint"):
+        with gr.TabItem("Avançado · Exportar"):
             gr.Markdown("""```plaintext 
 Reduce the Base model size from 5GB to 1.3GB. The new checkpoint file prunes out optimizer and etc., can be used for inference or finetuning afterward, but not able to resume pretraining.
 ```""")
@@ -1840,7 +1842,7 @@ Reduce the Base model size from 5GB to 1.3GB. The new checkpoint file prunes out
                 outputs=[txt_info_reduse],
             )
 
-        with gr.TabItem("System Info"):
+        with gr.TabItem("Recursos da máquina"):
             output_box = gr.Textbox(label="GPU and CPU Information", lines=20)
 
             def update_stats():
@@ -1869,7 +1871,7 @@ Reduce the Base model size from 5GB to 1.3GB. The new checkpoint file prunes out
 def main(port, host, share, api):
     global app
     print("Starting app...")
-    app.queue(api_open=api).launch(server_name=host, server_port=port, share=share, show_api=api)
+    app.queue(api_open=api).launch(server_name=host, server_port=port, share=share)
 
 
 if __name__ == "__main__":

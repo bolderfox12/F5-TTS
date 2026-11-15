@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import torchaudio
 from tqdm import tqdm
 
+from f5_tts.audio import load_audio
 from f5_tts.eval.ecapa_tdnn import ECAPA_TDNN_SMALL
 from f5_tts.model.modules import MelSpec
 from f5_tts.model.utils import convert_char_to_pinyin
@@ -108,7 +109,7 @@ def get_inference_prompt(
 
     for utt, prompt_text, prompt_wav, gt_text, gt_wav in tqdm(metainfo, desc="Processing prompts..."):
         # Audio
-        ref_audio, ref_sr = torchaudio.load(prompt_wav)
+        ref_audio, ref_sr = load_audio(prompt_wav)
         ref_rms = torch.sqrt(torch.mean(torch.square(ref_audio)))
         if ref_rms < target_rms:
             ref_audio = ref_audio * target_rms / ref_rms
@@ -134,7 +135,7 @@ def get_inference_prompt(
         ref_mel_len = ref_mel.shape[-1]
 
         if use_truth_duration:
-            gt_audio, gt_sr = torchaudio.load(gt_wav)
+            gt_audio, gt_sr = load_audio(gt_wav)
             if gt_sr != target_sample_rate:
                 resampler = torchaudio.transforms.Resample(gt_sr, target_sample_rate)
                 gt_audio = resampler(gt_audio)
@@ -394,8 +395,8 @@ def run_sim(args):
 
     sim_results = []
     for gen_wav, prompt_wav, truth in tqdm(test_set):
-        wav1, sr1 = torchaudio.load(gen_wav)
-        wav2, sr2 = torchaudio.load(prompt_wav)
+        wav1, sr1 = load_audio(gen_wav)
+        wav2, sr2 = load_audio(prompt_wav)
 
         if use_gpu:
             wav1 = wav1.cuda(device)

@@ -1,191 +1,293 @@
-# F5-TTS: A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching
+# F5 Studio — Local Voice Production with F5-TTS
 
-## Versão local recomendada — F5 Studio
-
-Para usar o conjunto mais recente de ferramentas no seu PC, escolha a branch **`studio/local-tools`** ([PR #5](https://github.com/bolderfox12/F5-TTS/pull/5)). O código continua em revisão; a `main` ainda não recebeu todas as implementações.
-
-Inclui projetos com múltiplas vozes, edição por trechos, transcrição e tradução local de legendas, regravação por texto, ferramentas WAV/MP3 e dicionário de pronúncia. Não utiliza APIs pagas. Os modelos precisam de um download inicial.
-
-Com o ambiente Python/PyTorch preparado:
-
-```bash
-git fetch origin
-git switch studio/local-tools
-python -m pip install -e ".[studio]"
-f5-tts_studio
-```
-
-Abra `http://127.0.0.1:7862`. Veja as [instruções completas e o escopo da versão local](https://github.com/bolderfox12/F5-TTS/tree/studio/local-tools#f5-studio-local--narração-legendas-e-ferramentas-de-áudio).
-
-Os 30 testes locais passaram; os modelos completos/GPU e o visual no navegador ainda precisam de validação. Conversão de voz preservando atuação, dublagem de vídeo sincronizada, música/SFX por IA e agentes conversacionais ainda não estão implementados.
-
-
-[![python](https://img.shields.io/badge/Python-3.15.2-brightgreen)](https://github.com/bolderfox12/F5-TTS/tree/python/latest-stable)
+[![Python](https://img.shields.io/badge/Python-3.11%E2%80%933.15-brightgreen)](pyproject.toml)
+[![Release](https://img.shields.io/github/v/release/bolderfox12/F5-TTS)](https://github.com/bolderfox12/F5-TTS/releases/latest)
+[![License: MIT](https://img.shields.io/badge/Code-MIT-blue.svg)](LICENSE)
 [![arXiv](https://img.shields.io/badge/arXiv-2410.06885-b31b1b.svg?logo=arXiv)](https://arxiv.org/abs/2410.06885)
-[![demo](https://img.shields.io/badge/GitHub-Demo-orange.svg)](https://swivid.github.io/F5-TTS/)
-[![hfspace](https://img.shields.io/badge/🤗-HF%20Space-yellow)](https://huggingface.co/spaces/mrfakename/E2-F5-TTS)
-[![msspace](https://img.shields.io/badge/🤖-MS%20Space-blue)](https://modelscope.cn/studios/AI-ModelScope/E2-F5-TTS)
-[![lab](https://img.shields.io/badge/🏫-X--LANCE-grey?labelColor=lightgrey)](https://x-lance.sjtu.edu.cn/)
-[![lab](https://img.shields.io/badge/🏫-SII-grey?labelColor=lightgrey)](https://www.sii.edu.cn/)
-[![lab](https://img.shields.io/badge/🏫-PCL-grey?labelColor=lightgrey)](https://www.pcl.ac.cn)
-<!-- <img src="https://github.com/user-attachments/assets/12d7749c-071a-427c-81bf-b87b91def670" alt="Watermark" style="width: 40px; height: auto"> -->
 
-**F5-TTS**: Diffusion Transformer with ConvNeXt V2, faster trained and inference.
+F5 Studio is a local voice production interface built on [F5-TTS](https://github.com/SWivid/F5-TTS).
+Record a voice reference, generate speech, switch between your own checkpoints and the original model,
+prepare narration projects, and work with subtitles and audio files on your computer.
 
-**E2 TTS**: Flat-UNet Transformer, closest reproduction from [paper](https://arxiv.org/abs/2406.18009).
+This fork includes a NiceGUI Studio, guided fine-tuning, local transcription and translation,
+and the original advanced Gradio, CLI, and training tools. The Studio interface currently uses
+Brazilian Portuguese labels; this README and the release notes are in English.
 
-**Sway Sampling**: Inference-time flow step sampling strategy, greatly improves performance
+**Current release: F5 Studio 1.2.0.** See the [release notes](docs/releases/v1.2.0.md) and [changelog](CHANGELOG.md).
 
-### Thanks to all the contributors !
+## Features
 
-## News
-- **2025/03/12**: 🔥 F5-TTS v1 base model with better training and inference performance. [Few demo](https://swivid.github.io/F5-TTS_updates).
-- **2024/10/08**: F5-TTS & E2 TTS base models on [🤗 Hugging Face](https://huggingface.co/SWivid/F5-TTS), [🤖 Model Scope](https://www.modelscope.cn/models/SWivid/F5-TTS_Emilia-ZH-EN), [🟣 Wisemodel](https://wisemodel.cn/models/SJTU_X-LANCE/F5-TTS_Emilia-ZH-EN).
+| Area | What you can do |
+| --- | --- |
+| Create audio — **Criar áudio** | Record or upload a reference, select a saved voice and model, generate speech, preview it, and download WAV. |
+| My voices — **Minhas vozes** | Save named recordings and their transcripts. Saving a reference does not train a model. |
+| My models — **Meus modelos** | Register local checkpoints and vocabularies, including a Portuguese fine-tune, while keeping the original English/Chinese model available. |
+| Narration projects — **Projetos de narração** | Edit and reorder paragraphs, assign voices and pauses, generate changed segments, and export WAV and SRT. |
+| Transcription and subtitles — **Transcrição e legendas** | Run Whisper Small or Turbo locally, review segments, and export TXT/SRT. Translate subtitles with local NLLB. |
+| Revoice — **Regravar áudio** | Generate a new narration from revised or translated text using a saved voice and your selected model. |
+| Audio tools — **Ferramentas de áudio** | Convert WAV/MP3, adjust volume, reduce steady noise, and trim silence with FFmpeg. |
+| Train a voice — **Treinar uma voz** | Import recordings, review and approve examples, prepare a dataset, fine-tune, and compare checkpoints. |
+| History — **Histórico** | Replay and download generated audio, including the model name and generation settings. |
+| Settings — **Configurações** | Choose CPU/CUDA, speed, generation steps, pronunciation rules, and download preferences. |
 
+Speech and text processing run locally. Model weights require an initial download; no paid API keys
+are needed for these Studio features. The app binds to `127.0.0.1` and is intended for one local user.
 
-## Alterações deste fork
+## Installation
 
-- **Novo F5 Studio (NiceGUI):** interface com menu lateral para criar áudio, salvar vozes, treinar por etapas, consultar o histórico e configurar CPU/CUDA. Inclui o treinamento e Python 3.15.2. Disponível na branch [`studio/nicegui`](https://github.com/bolderfox12/F5-TTS/tree/studio/nicegui), no [PR #4](https://github.com/bolderfox12/F5-TTS/pull/4).
+### 1. Requirements
 
-### Abrir a nova interface
+- Git and FFmpeg/ffprobe on your `PATH`.
+- Python within the package range **3.11–3.15**. **Python 3.12 is the locally validated setup for this release.**
+- For NVIDIA acceleration, a driver compatible with your selected PyTorch CUDA build.
+- On Linux, the system `libsndfile` audio library.
 
-Depois de instalar Python/PyTorch e criar o ambiente conforme as instruções:
+Ubuntu/Debian:
 
 ```bash
-git fetch origin
-git switch studio/nicegui
-python -m pip install -e ".[studio]"
-f5-tts_studio
+sudo apt-get update
+sudo apt-get install ffmpeg libsndfile1
 ```
 
-Abra `http://127.0.0.1:7862`. As [instruções completas do estúdio](https://github.com/bolderfox12/F5-TTS/tree/studio/nicegui#novo-f5-studio--interface-nicegui) incluem Windows e uso da GPU.
-A interface ainda está em revisão. TensorRT não foi integrado; CUDA utiliza o backend PyTorch existente. Geração e treinamento reais com GPU ainda precisam ser validados.
+On Windows, install FFmpeg and add its `bin` directory to `PATH`. On macOS, use
+`brew install ffmpeg libsndfile` if you use Homebrew.
 
+Check the tools before continuing:
 
-- **Treinamento guiado com áudios prontos:** envie vários arquivos, escolha o idioma, gere transcrições, revise e aprove antes de treinar. Depois teste checkpoints e registre avaliações. Disponível na branch [`training/guided`](https://github.com/bolderfox12/F5-TTS/tree/training/guided), no [PR #3](https://github.com/bolderfox12/F5-TTS/pull/3). Veja as [instruções de abertura](https://github.com/bolderfox12/F5-TTS/tree/training/guided#treinamento-guiado--novo-assistente).
+```bash
+git --version
+ffmpeg -version
+ffprobe -version
+```
 
-- **Python 3.15.2:** instalação e dependências atualizadas; leitura e gravação de áudio sem TorchCodec obrigatório. Disponível na branch [`python/latest-stable`](https://github.com/bolderfox12/F5-TTS/tree/python/latest-stable), no [PR #2](https://github.com/bolderfox12/F5-TTS/pull/2).
-- **Nova interface:** estúdio de voz com controles principais em português, visual verde-petróleo e fluxo em três etapas. Disponível na branch [`interface/estudio-voz-pt-br`](https://github.com/bolderfox12/F5-TTS/tree/interface/estudio-voz-pt-br), no [PR #1](https://github.com/bolderfox12/F5-TTS/pull/1).
-- **Verificações:** testes de compatibilidade com Python 3.15.2 em CPU e verificações de código aprovados no GitHub. Geração com checkpoints reais, treinamento completo e GPU ainda precisam de validação.
-
-As melhorias estão em revisão e ainda não foram integradas à `main`.
-Siga a seção de instalação para usar a branch de Python 3.15.2.
-
-## Instalação — Python 3.15.2
-
-> **Importante:** os ajustes de compatibilidade estão na branch
-> [`python/latest-stable`](https://github.com/bolderfox12/F5-TTS/tree/python/latest-stable)
-> ([PR #2](https://github.com/bolderfox12/F5-TTS/pull/2)). Faça o `git switch`
-> indicado abaixo antes de instalar. A branch `main` ainda não recebeu esses ajustes.
-
-Este fork foi atualizado para **CPython 3.15.2**, a versão estável mais recente
-verificada em 15/11/2026 ([Python.org](https://www.python.org/downloads/release/python-3152/)).
-Use a distribuição normal com GIL; builds free-threaded não foram validados.
-A instalação, importação, leitura/gravação de WAV e execução forward/backward de
-um modelo pequeno são testadas em CPU. Isso não equivale a validar treinamento
-completo, checkpoints, qualidade de voz ou todos os aceleradores.
-
-### 1. Pré-requisitos
-
-- Git, Python 3.15.2 e FFmpeg/ffprobe disponíveis no terminal.
-- NVIDIA: driver compatível com a versão CUDA do PyTorch escolhido.
-- Windows: instalar o FFmpeg e adicionar sua pasta `bin` ao PATH.
-- Ubuntu/Debian: `sudo apt-get install ffmpeg libsndfile1`.
-- macOS com Homebrew: `brew install ffmpeg libsndfile`.
-
-Confira: `ffmpeg -version`, `ffprobe -version` e `git --version`.
-
-### 2. Baixar este fork e criar um ambiente isolado
+### 2. Clone this fork and create an isolated environment
 
 ```bash
 git clone https://github.com/bolderfox12/F5-TTS.git
 cd F5-TTS
-# Enquanto esta atualização estiver em revisão:
-git switch python/latest-stable
 ```
 
-**Windows (PowerShell):**
+The release is available on `main`; the Studio development branch is `studio/local-tools`.
+For the exact release source, use `git checkout v1.2.0` after cloning.
+
+**Windows PowerShell:**
 
 ```powershell
-py -3.15 -m venv .venv
-# A ativação é opcional: estes comandos usam diretamente o Python do ambiente.
-.\.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip setuptools wheel
 ```
+
+If you do not activate the environment, replace `python` with `.\.venv\Scripts\python.exe`
+and run Studio using `.\.venv\Scripts\f5-tts_studio.exe`.
 
 **Linux/macOS:**
 
 ```bash
-python3.15 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
 ```
 
-Nos comandos abaixo, no Windows substitua `python` por
-`.\.venv\Scripts\python.exe` se não ativou o ambiente.
+### 3. Install PyTorch for your hardware
 
-### 3. Instalar PyTorch antes do projeto
+For NVIDIA, AMD, Intel, or Apple Silicon, follow the official
+[PyTorch installation selector](https://pytorch.org/get-started/locally/) for your operating system,
+Python version, and accelerator. Check the [TorchAudio compatibility guidance](https://docs.pytorch.org/audio/stable/installation.html).
 
-**CPU (rota usada nos testes locais):**
+For a CPU-only environment:
 
 ```bash
-python -m pip install "torch>=2.15.0" torchaudio --index-url https://download.pytorch.org/whl/cpu
+python -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 ```
 
-**NVIDIA, AMD, Intel ou Apple Silicon:** use o seletor oficial
-[PyTorch](https://pytorch.org/get-started/locally/) para escolher um build estável
-que ofereça wheels para Python 3.15 e suporte à sua GPU e ao seu driver.
-Não reutilize os comandos antigos para torch 2.8/CUDA 12.8: eles não são a rota
-para Python 3.15. Não misture arbitrariamente versões de torch e torchaudio;
-consulte a [matriz do TorchAudio](https://docs.pytorch.org/audio/stable/installation.html).
-A combinação validada em CPU neste fork é torch 2.15.0 + torchaudio 2.11.1.
+The local GPU smoke test used **Python 3.12.16, PyTorch 2.15.0+cu132, TorchAudio 2.11.1+cu132,
+and an NVIDIA RTX 3080 Ti with 12 GB of VRAM under WSL2**. This is a tested configuration,
+not a requirement to install those exact versions on every computer.
 
-### 4. Instalar e verificar
+### 4. Install and open Studio
 
 ```bash
-python -m pip install -e .
+python -m pip install -e ".[studio]"
 python -m pip check
-python -m unittest discover -s tests -v
+f5-tts_studio
 ```
 
-A instalação editável usa **este fork**. `pip install f5-tts` instala a distribuição
-publicada no PyPI e não inclui automaticamente estas modificações.
-Para o vocoder BigVGAN opcional: `git submodule update --init --recursive`.
-A leitura/gravação de áudio do aplicativo usa SoundFile, sem exigir TorchCodec.
-A compatibilidade do pydub com Python 3.13+ é fornecida por `audioop-lts`.
-WAV é o formato recomendado; outros codecs dependem do libsndfile/FFmpeg disponível.
-
-### 5. Abrir a interface
+Open **http://127.0.0.1:7862**. You can also use:
 
 ```bash
-f5-tts_infer-gradio --inbrowser
+f5-tts_studio --no-browser
+f5-tts_studio --port 7870
+f5-tts_studio --workspace /path/to/your/workspace
 ```
 
-No Windows sem ativação:
+Installing `f5-tts` from PyPI alone does not select this fork. Install from this checkout or
+use the distribution files attached to this fork's GitHub release, with the `studio` extra.
+Optional BigVGAN support also needs `git submodule update --init --recursive`.
+Audio I/O uses SoundFile; TorchCodec is not required by this fork's audio helpers.
+
+## Record a reference with your microphone
+
+In **Criar áudio**, **Minhas vozes**, or the training checkpoint comparison:
+
+1. Click **Gravar pelo microfone** and allow microphone access in your browser.
+2. Speak clearly, then click **Parar gravação**. Recording stops automatically at 30 seconds; prefer up to 12 seconds.
+3. Listen to the preview and click **Usar esta gravação**.
+4. Generate speech or save the voice. Enter the reference transcript if you already know it.
+
+The microphone is released when recording stops or you leave the page. Audio is sent to the local
+Studio only after you click **Usar esta gravação**, then FFmpeg converts it to mono 24 kHz WAV.
+Uploading an existing recording remains available.
+
+Use `http://127.0.0.1:7862` or `http://localhost:7862` for browser microphone access.
+An externally hosted browser origin would require HTTPS; the supplied Studio server binds only to loopback.
+
+## Keep your Portuguese model and the original model
+
+1. Open **Meus modelos** and enter a name such as **My Portuguese model**.
+2. Choose your `.pt`, `.pth`, `.ckpt`, or `.safetensors` checkpoint and the training `vocab.txt`,
+   or paste their local file paths. Windows paths such as `C:\Models\portuguese.pt` are accepted under WSL.
+3. Select the architecture used for training: **F5-TTS v1 Base**, **F5-TTS Base**, or **E2-TTS Base**.
+4. Click **Cadastrar modelo**.
+5. In **Criar áudio**, select it under **Modelo para gerar áudio**. In **Regravar áudio**, use **Modelo para regravar**.
+
+The **F5-TTS original · inglês / chinês** option stays available. Switching models does not overwrite
+other checkpoints, and History records which model generated each audio file. Weights are loaded only
+when synthesis needs them. Models trained inside Studio remain available through the trained-project controls.
+
+Use the vocabulary from training; leave it blank only if the training kept the original vocabulary.
+Uploaded model files are stored in the workspace. Pasted paths refer to the original files, which must
+remain accessible. Registering a name does not train or convert a model, and a saved voice is a reference,
+not a checkpoint. Portuguese pronunciation depends on the checkpoint and its training data.
+
+## Narration, subtitles, and local audio tools
+
+For narration, separate paragraphs with blank lines, assign voices, then save edits before generating.
+Changed text, voice references, pronunciation rules, and trained checkpoints invalidate previous segment
+audio. **Parar depois do trecho atual** stops after the current segment while preserving finished work.
+Exported SRT timings describe segments rather than word-level alignment.
+
+Transcription supports `openai/whisper-small` and `openai/whisper-large-v3-turbo`.
+Subtitle translation uses `facebook/nllb-200-distilled-600M` for Portuguese, English, Spanish, French, and German.
+The original transcription is preserved; translated subtitles keep the source segment timestamps.
+Review recognition and translation results before exporting or generating a new narration.
+
+FFmpeg provides format conversion, volume adjustment, steady-noise reduction, and silence trimming.
+The noise filter does not separate voices from music. Text-based revoicing does not preserve the original
+performance, emotion, timing, or lip synchronization.
+
+## Storage, downloads, and offline operation
+
+By default, Studio stores voices, uploads, generated files, settings, and model registrations in
+`~/.f5tts-studio`. Use `--workspace` to select another directory. In an editable checkout,
+training projects use `data/` and checkpoints use `ckpts/`.
+
+The optional Linux launcher `bash iniciar-studio.sh` uses `.studio/` for the workspace and
+`.cache/huggingface` for model downloads inside this checkout. Keep using the same launch method
+or workspace path to access the same voices and history.
+
+The initial **F5-TTS v1 Base + Vocos** download is approximately **1.40 GB**:
+1,348,435,761 bytes for the checkpoint and 54,365,991 bytes for the vocoder, plus small configuration files.
+PyTorch/CUDA dependencies require additional disk space. Whisper and NLLB are separate downloads;
+providing your reference transcript avoids downloading an ASR model solely to transcribe that reference.
+
+The cache preference in Settings applies to the local transcription and translation tools.
+For completely offline use, download every model you need first, including synthesis and vocoder weights:
+
+```bash
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 f5-tts_studio
+```
+
+On Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\f5-tts_infer-gradio.exe --inbrowser
+$env:HF_HUB_OFFLINE="1"
+$env:TRANSFORMERS_OFFLINE="1"
+.\.venv\Scripts\f5-tts_studio.exe
 ```
 
-O primeiro uso baixa os modelos e precisa de internet e espaço em disco.
-Os checkpoints originais são voltados a inglês e chinês; traduzir a interface
-não adiciona idiomas ao modelo.
+Missing weights must be downloaded before enabling offline mode. Model licenses still apply;
+see [License](#license) and the individual model repositories.
 
-### Docker (CPU, Python 3.15.2)
+## Guided fine-tuning
+
+Open **Treinar uma voz**, or use the advanced Gradio training interface:
 
 ```bash
-docker build -f Dockerfile.python315 -t f5tts-python315 .
-docker run --rm -p 7860:7860 -v f5-tts-cache:/root/.cache/huggingface/hub f5tts-python315
+f5-tts_finetune-gradio --port 7861
 ```
 
-O Dockerfile.python315 usa os arquivos deste checkout. A imagem publicada
-`ghcr.io/swivid/f5-tts:main` pertence ao projeto original e não contém
-necessariamente esta atualização. O Dockerfile original com CUDA foi preservado. O Dockerfile.python315 é voltado a CPU;
-para GPU, prepare uma imagem compatível com seu runtime NVIDIA/ROCm.
-O runtime especializado Triton/TensorRT-LLM em `src/f5_tts/runtime/` mantém seu
-ambiente próprio e não foi migrado nem validado com Python 3.15.
-Os extras de avaliação (`.[eval]`) também precisam de validação independente.
+The guided workflow is:
 
-### Runtime
+1. Create or open a project.
+2. Import recordings, select the language, and generate transcripts. Long recordings are split into examples.
+3. Listen to each example, correct its transcript, explicitly approve it, and prepare the dataset.
+4. Select a training profile, start fine-tuning, and monitor or stop the process.
+5. Compare saved checkpoints with a reference and a new sentence, and save your evaluation.
+
+Examples are stored as mono 24 kHz WAV and must be 1–30 seconds long; prefer 3–12 seconds.
+Three examples totaling 15 seconds are only the minimum for trying the workflow, not enough-data guidance
+for a good voice. Editing examples invalidates the prepared dataset. Saved ratings do not update weights;
+to teach a correction, add a correct recording and prepare/train again.
+
+The guided presets target NVIDIA/CUDA fine-tuning of F5-TTS v1. Existing project checkpoints can be resumed;
+create another project for an independent experiment. Heavy operations within one Studio instance are
+serialized. Full GPU training was not part of this release's local validation.
+
+## Validation and development
+
+Install the test runner and run the offline suite:
+
+```bash
+python -m pip install pytest
+python -m pytest tests -q -p no:cacheprovider
+```
+
+Release validation: **36 tests and 14 subtests passed**, covering persistence, model registration/switching,
+microphone conversion, dataset review, narration invalidation, FFmpeg conversions, and all ten Studio pages.
+The HTTP startup timeout is configurable through `F5_STUDIO_TEST_STARTUP_TIMEOUT` (default: 120 seconds),
+which helps with slow imports on Windows-mounted WSL drives.
+
+Browser validation on Linux with a simulated microphone:
+
+```bash
+python -m pip install playwright
+python -m playwright install --with-deps chromium --only-shell
+# Start this in a separate terminal:
+f5-tts_studio --port 7863 --no-browser --workspace /tmp/f5-studio-microphone-test
+# Then run:
+python testar-microfone-navegador.py
+```
+
+The browser check records audio, previews it, releases the microphone, saves a reference/voice, simulates
+permission denial, registers a dummy checkpoint without loading it, and switches back to the original model.
+It uses the temporary workspace, not your usual Studio workspace.
+
+For an opt-in real-model GPU smoke test, run `python testar-modelo-real.py`. It downloads approximately
+1.40 GB of weights if missing, uses the bundled English reference, and adds English and Portuguese samples
+to the checkout's `.studio` history. The locally validated outputs were 6.848 and 8 seconds at 24 kHz,
+with finite, non-silent samples and no PCM saturation after the export fix.
+
+The local validation does not establish Portuguese pronunciation quality, validate your private trained
+checkpoint, run complete fine-tuning, or validate Whisper/NLLB quality with downloaded weights.
+TensorRT is not integrated into Studio; it uses the PyTorch backend. The specialized runtime below
+has its own setup. Evaluation extras and other hardware configurations need separate validation.
+
+## Upstream project
+
+This fork builds on **F5-TTS: A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching**,
+including the Diffusion Transformer/ConvNeXt V2 architecture and Sway Sampling.
+It also retains the E2 TTS Flat-UNet Transformer reproduction and the original advanced tools.
+
+- [Upstream repository](https://github.com/SWivid/F5-TTS)
+- [Paper](https://arxiv.org/abs/2410.06885)
+- [Original demos](https://swivid.github.io/F5-TTS/)
+- [Hugging Face models](https://huggingface.co/SWivid/F5-TTS)
+- [Advanced inference guidance](src/f5_tts/infer/README.md)
+- [Training guidance](src/f5_tts/train/README.md)
+
+## Specialized runtime
+
 
 Deployment solution with Triton and TensorRT-LLM.
 

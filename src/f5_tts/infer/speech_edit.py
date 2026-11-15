@@ -1,5 +1,7 @@
 import os
 
+from f5_tts.audio import load_audio, save_audio
+
 
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"  # for MPS device compatibility
 
@@ -128,7 +130,7 @@ dtype = torch.float32 if mel_spec_type == "bigvgan" else None
 model = load_checkpoint(model, ckpt_path, device, dtype=dtype, use_ema=use_ema)
 
 # Audio
-audio, sr = torchaudio.load(audio_to_edit)
+audio, sr = load_audio(audio_to_edit)
 if audio.shape[0] > 1:
     audio = torch.mean(audio, dim=0, keepdim=True)
 rms = torch.sqrt(torch.mean(torch.square(audio)))
@@ -225,5 +227,5 @@ with torch.inference_mode():
         generated_wave = generated_wave * rms / target_rms
 
     save_spectrogram(gen_mel_spec[0].cpu().numpy(), f"{output_dir}/speech_edit_out.png")
-    torchaudio.save(f"{output_dir}/speech_edit_out.wav", generated_wave, target_sample_rate)
+    save_audio(f"{output_dir}/speech_edit_out.wav", generated_wave, target_sample_rate)
     print(f"Generated wav: {generated_wave.shape}")
