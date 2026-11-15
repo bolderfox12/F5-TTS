@@ -180,6 +180,10 @@ class StudioRouteTests(unittest.TestCase):
                     ("/training", "Enviar seus"),
                     ("/history", "Tudo o que"),
                     ("/settings", "Controle o"),
+                    ("/projects", "Histórias com"),
+                    ("/transcription", "Do áudio"),
+                    ("/revoice", "Outra voz"),
+                    ("/audio-tools", "Prepare e exporte"),
                 ]:
                     connection = http.client.HTTPConnection("127.0.0.1", 17862, timeout=10)
                     connection.request("GET", route)
