@@ -11,11 +11,11 @@ from importlib.resources import files
 
 import numpy as np
 import torch
-import torchaudio
 from huggingface_hub import hf_hub_download
 from hydra.utils import get_class
 from omegaconf import OmegaConf
 
+from f5_tts.audio import load_audio
 from f5_tts.device_utils import get_default_device
 from f5_tts.infer.utils_infer import (
     chunk_text,
@@ -104,7 +104,7 @@ class TTSStreamingProcessor:
 
     def update_reference(self, ref_audio, ref_text):
         self.ref_audio, self.ref_text = preprocess_ref_audio_text(ref_audio, ref_text)
-        self.audio, self.sr = torchaudio.load(self.ref_audio)
+        self.audio, self.sr = load_audio(self.ref_audio)
 
         ref_audio_duration = self.audio.shape[-1] / self.sr
         ref_text_byte_len = len(self.ref_text.encode("utf-8"))
