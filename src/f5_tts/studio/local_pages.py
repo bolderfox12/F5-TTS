@@ -466,6 +466,21 @@ def register_local_pages(service, shell, action, audio_upload):
                     "Ferramentas locais com FFmpeg. A redução de ruído é simples: não equivale a separar voz, música ou falantes com IA."
                 )
             ).classes("studio-muted")
+            with ui.row().classes("w-full gap-4 flex-wrap"):
+                for icon, heading, detail in [
+                    ("volume_up", "Equilibrar volume", "Ajusta o volume para uma intensidade uniforme."),
+                    (
+                        "graphic_eq",
+                        "Reduzir ruído contínuo",
+                        "Atenua ventilador e chiado constante; pode afetar a voz.",
+                    ),
+                    ("content_cut", "Cortar silêncios", "Remove pausas longas no começo e no fim do áudio."),
+                    ("swap_horiz", "Converter formato", "Exporta uma cópia em WAV ou MP3 sem alterar o original."),
+                ]:
+                    with ui.card().classes("studio-card studio-tool-card gap-2").style("flex:1 1 210px"):
+                        ui.icon(icon, color="primary", size="25px")
+                        ui.label(t(heading)).classes("font-semibold")
+                        ui.label(t(detail)).classes("text-sm studio-muted")
             with ui.card().classes("studio-card w-full"):
                 status = ui.label(t("Envie o áudio que deseja processar."))
                 audio_upload(paths, status)
@@ -479,8 +494,24 @@ def register_local_pages(service, shell, action, audio_upload):
                     value="normalize",
                     label=t("O que fazer?"),
                 ).props("outlined")
+                effect_help = ui.label("").classes("text-sm studio-muted")
+                effect_descriptions = {
+                    "none": t("Converte o contêiner e mantém o áudio sem aplicar efeitos."),
+                    "normalize": t("Útil quando o áudio está baixo ou varia muito de volume."),
+                    "noise": t("Reduz chiado ou ruído estável; não separa voz de música e pode deixar artefatos."),
+                    "silence": t("Remove silêncio longo nas extremidades; não edita pausas internas da fala."),
+                }
+
+                def explain_effect():
+                    effect_help.set_text(effect_descriptions[effect.value])
+
+                effect.on_value_change(explain_effect)
+                explain_effect()
                 fmt = ui.select({"wav": t("WAV"), "mp3": t("MP3")}, value="wav", label=t("Formato de saída")).props(
                     "outlined"
+                )
+                ui.label(t("O arquivo original permanece intacto; o resultado é salvo como uma nova cópia.")).classes(
+                    "text-xs studio-muted"
                 )
 
                 async def process():

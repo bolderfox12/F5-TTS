@@ -7,15 +7,14 @@
 A local web studio for creating speech, saved voices, narrated stories, subtitles, and voice models.
 F5 Studio uses [F5-TTS](https://github.com/SWivid/F5-TTS) for speech synthesis and runs processing on your computer.
 
-**Version 1.3.2:** an expanded training workspace, checkpoint comparison and publishing, model storage
-management, and an audio library with waveform previews and non-destructive trimming. See the [release notes](docs/releases/v1.3.2.md)
+**Version 1.3.3:** audio export controls for WAV/MP3, quality, optional denoising and stereo, plus a refreshed animated navigation and in-context audio tool guides. See the [release notes](docs/releases/v1.3.3.md)
 and [changelog](CHANGELOG.md).
 
 ## What you can do
 
 | Page | Purpose |
 | --- | --- |
-| Create audio | Record or upload a reference, select a voice and model, generate speech, and download WAV. |
+| Create audio | Record or upload a reference, select a voice and model, then export WAV or MP3 with quality, denoising, and stereo options. |
 | My voices | Keep named reference recordings and transcripts for reuse. |
 | My models | Inspect model files and disk usage, register checkpoints, and remove managed weights when they are no longer needed. |
 | Audio library | Find and filter generated audio and voice references; preview waveforms, trim audio into a new WAV, save clips as voices, copy, move, download, or delete files. |
@@ -23,7 +22,7 @@ and [changelog](CHANGELOG.md).
 | Narration projects | Work with paragraph-based narration, voice assignments, segment edits, pauses, and WAV/SRT export. |
 | Transcription and subtitles | Transcribe locally, correct segments, translate subtitles, and export TXT/SRT. |
 | Revoice | Create a new narration from revised or translated text with the chosen voice and model. |
-| Audio tools | Convert WAV/MP3, adjust volume, reduce steady noise, and trim silence with FFmpeg. |
+| Audio tools | Convert WAV/MP3, adjust volume, reduce steady noise, and trim silence with FFmpeg, with in-page explanations for each effect. |
 | Train a voice | Review recordings, tune GPU training, upload a starting checkpoint, compare saved versions, and publish a selected checkpoint for inference. |
 | History | Replay and download generated audio, with its model and generation settings. |
 | Settings | Choose CPU/CUDA, speed, generation steps, pronunciation rules, and cache preferences. |

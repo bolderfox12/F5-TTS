@@ -13,6 +13,7 @@ from importlib.resources import files
 from pathlib import Path, PureWindowsPath
 from uuid import uuid4
 
+import numpy as np
 import soundfile as sf
 import torch
 
@@ -472,10 +473,23 @@ class StudioService(StoryTools, LocalTools):
         return model
 
     def generate(
-        self, text, reference=None, transcript="", voice_id=None, project=None, checkpoint=None, model_id="original"
+        self,
+        text,
+        reference=None,
+        transcript="",
+        voice_id=None,
+        project=None,
+        checkpoint=None,
+        model_id="original",
+        output_format="wav",
+        output_quality="standard",
+        remove_noise=False,
+        stereo=False,
     ):
         if not text or not text.strip():
             raise ValueError("Escreva o texto que deseja transformar em voz.")
+        if output_format not in ("wav", "mp3") or output_quality not in ("high", "standard", "compact"):
+            raise ValueError("Escolha um formato e uma qualidade de áudio válidos.")
         if not self._operation.acquire(blocking=False):
             raise ValueError("Aguarde a operação atual ou pare o treinamento antes de gerar áudio.")
         try:
@@ -538,19 +552,22 @@ class StudioService(StoryTools, LocalTools):
                 )
                 self._model_key = key
             identifier = uuid4().hex
-            path = self.outputs / (identifier + ".wav")
+            path = self.outputs / (identifier + "." + output_format)
             spoken_text = self.pronounce(text.strip(), data.get("pronunciations", {}))
-            self._model.infer(
-                ref_file=reference,
-                ref_text=transcript or "",
-                gen_text=spoken_text,
-                nfe_step=settings["steps"],
-                speed=settings["speed"],
-                seed=42,
-                file_wave=str(path),
-            )
-            if not path.exists():
-                raise RuntimeError("O modelo não produziu o arquivo de áudio.")
+            with tempfile.TemporaryDirectory(prefix="f5-studio-") as temp_dir:
+                source = Path(temp_dir) / "generated.wav"
+                self._model.infer(
+                    ref_file=reference,
+                    ref_text=transcript or "",
+                    gen_text=spoken_text,
+                    nfe_step=settings["steps"],
+                    speed=settings["speed"],
+                    seed=42,
+                    file_wave=str(source),
+                )
+                if not source.exists():
+                    raise RuntimeError("O modelo não produziu o arquivo de áudio.")
+                self._export_generated_audio(source, path, output_format, output_quality, remove_noise, stereo)
             entry = {
                 "id": identifier,
                 "text": text.strip(),
@@ -565,6 +582,10 @@ class StudioService(StoryTools, LocalTools):
                 "architecture": architecture,
                 "steps": settings["steps"],
                 "speed": settings["speed"],
+                "format": output_format,
+                "quality": output_quality,
+                "noise_reduction": bool(remove_noise),
+                "stereo": bool(stereo),
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "rating": "",
                 "note": "",
@@ -576,6 +597,75 @@ class StudioService(StoryTools, LocalTools):
             return entry
         finally:
             self._operation.release()
+
+    @staticmethod
+    def _export_generated_audio(source, target, output_format, quality, remove_noise, stereo):
+        """Apply requested container, encoding quality, and optional output processing."""
+        bitrates = {"high": "320k", "standard": "192k", "compact": "128k"}
+        subtypes = {"high": "PCM_24", "standard": "PCM_16", "compact": "PCM_16"}
+        sample_rates = {"high": 24000, "standard": 24000, "compact": 16000}
+        filtered = source
+        ffmpeg = shutil.which("ffmpeg")
+        if remove_noise:
+            if not ffmpeg:
+                raise ValueError("Instale o FFmpeg para ativar a redução de ruído.")
+            filtered = source.with_name("denoised.wav")
+            result = subprocess.run(
+                [
+                    ffmpeg,
+                    "-nostdin",
+                    "-y",
+                    "-i",
+                    str(source),
+                    "-af",
+                    "afftdn=nr=10",
+                    "-c:a",
+                    "pcm_s24le",
+                    str(filtered),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode:
+                raise ValueError("O FFmpeg não conseguiu reduzir o ruído deste áudio.")
+
+        if output_format == "mp3":
+            if not ffmpeg:
+                raise ValueError("Instale o FFmpeg para exportar em MP3.")
+            result = subprocess.run(
+                [
+                    ffmpeg,
+                    "-nostdin",
+                    "-y",
+                    "-i",
+                    str(filtered),
+                    "-vn",
+                    "-ac",
+                    "2" if stereo else "1",
+                    "-ar",
+                    str(sample_rates[quality]),
+                    "-c:a",
+                    "libmp3lame",
+                    "-b:a",
+                    bitrates[quality],
+                    str(target),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode:
+                raise ValueError("Não foi possível exportar o áudio em MP3. Confira o FFmpeg instalado.")
+            return
+
+        audio, sample_rate = sf.read(filtered, dtype="float32", always_2d=True)
+        if sample_rate != sample_rates[quality]:
+            import torchaudio
+
+            samples = torch.from_numpy(audio.T.copy())
+            audio = torchaudio.functional.resample(samples, sample_rate, sample_rates[quality]).T.numpy()
+        if stereo and audio.shape[1] == 1:
+            audio = np.repeat(audio, 2, axis=1)
+        sf.write(target, audio, sample_rates[quality], subtype=subtypes[quality])
 
     def rate(self, identifier, rating, note=""):
         if rating not in ("Ficou bom", "Precisa melhorar"):

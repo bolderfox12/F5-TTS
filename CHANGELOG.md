@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.3 — 2026-11-15
+
+### Added
+
+- WAV/MP3 export, quality presets, optional noise reduction, and stereo output in text-to-speech generation.
+- Grouped animated navigation, reduced-motion support, and explanatory cards for audio tools.
+
 ## 1.3.2 — 2026-11-15
 
 ### Added

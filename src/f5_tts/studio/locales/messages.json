@@ -4462,5 +4462,230 @@
     "Es gibt noch keine Audiodateien oder Ausgaben zum Organisieren.",
     "目前没有可整理的音频或输出文件。",
     "整理できる音声ファイルや出力ファイルはまだありません。"
+  ],
+  [
+    "CRIAR E EDITAR",
+    "CREATE AND EDIT",
+    "CREAR Y EDITAR",
+    "CRÉER ET MODIFIER",
+    "ERSTELLEN UND BEARBEITEN",
+    "创建与编辑",
+    "作成・編集"
+  ],
+  [
+    "PROJETOS",
+    "PROJECTS",
+    "PROYECTOS",
+    "PROJETS",
+    "PROJEKTE",
+    "项目",
+    "プロジェクト"
+  ],
+  [
+    "BIBLIOTECA",
+    "LIBRARY",
+    "BIBLIOTECA",
+    "BIBLIOTHÈQUE",
+    "BIBLIOTHEK",
+    "资料库",
+    "ライブラリ"
+  ],
+  [
+    "SISTEMA",
+    "SYSTEM",
+    "SISTEMA",
+    "SYSTÈME",
+    "SYSTEM",
+    "系统",
+    "システム"
+  ],
+  [
+    "03 / Saída do áudio",
+    "03 / Audio output",
+    "03 / Salida de audio",
+    "03 / Sortie audio",
+    "03 / Audioausgabe",
+    "03 / 音频输出",
+    "03 / 音声出力"
+  ],
+  [
+    "Qualidade do arquivo",
+    "File quality",
+    "Calidad del archivo",
+    "Qualité du fichier",
+    "Dateiqualität",
+    "文件质量",
+    "ファイル品質"
+  ],
+  [
+    "Alta qualidade",
+    "High quality",
+    "Alta calidad",
+    "Haute qualité",
+    "Hohe Qualität",
+    "高质量",
+    "高音質"
+  ],
+  [
+    "Padrão",
+    "Standard",
+    "Estándar",
+    "Standard",
+    "Standard",
+    "标准",
+    "標準"
+  ],
+  [
+    "Arquivo compacto",
+    "Compact file",
+    "Archivo compacto",
+    "Fichier compact",
+    "Kompakte Datei",
+    "精简文件",
+    "コンパクト"
+  ],
+  [
+    "MP3: {value_0} kbps; menor bitrate gera arquivos menores.",
+    "MP3: {value_0} kbps; lower bitrates create smaller files.",
+    "MP3: {value_0} kbps; menos bitrate genera archivos más pequeños.",
+    "MP3 : {value_0} kb/s ; un débit inférieur crée des fichiers plus petits.",
+    "MP3: {value_0} kbps; niedrigere Bitraten ergeben kleinere Dateien.",
+    "MP3：{value_0} kbps；较低码率可生成更小的文件。",
+    "MP3: {value_0} kbps。ビットレートを下げるとファイルサイズが小さくなります。"
+  ],
+  [
+    "WAV PCM 24-bit · 24 kHz · maior fidelidade e arquivo maior.",
+    "WAV PCM 24-bit · 24 kHz · highest fidelity and larger files.",
+    "WAV PCM 24-bit · 24 kHz · mayor fidelidad y archivos más grandes.",
+    "WAV PCM 24 bits · 24 kHz · meilleure fidélité et fichiers plus volumineux.",
+    "WAV PCM 24 Bit · 24 kHz · höchste Klangtreue und größere Dateien.",
+    "WAV PCM 24 位 · 24 kHz · 音质更高，文件更大。",
+    "WAV PCM 24-bit · 24 kHz · 高音質ですがファイルは大きくなります。"
+  ],
+  [
+    "WAV PCM 16-bit · 24 kHz · equilíbrio recomendado.",
+    "WAV PCM 16-bit · 24 kHz · recommended balance.",
+    "WAV PCM 16-bit · 24 kHz · equilibrio recomendado.",
+    "WAV PCM 16 bits · 24 kHz · équilibre recommandé.",
+    "WAV PCM 16 Bit · 24 kHz · empfohlene Balance.",
+    "WAV PCM 16 位 · 24 kHz · 推荐的平衡设置。",
+    "WAV PCM 16-bit · 24 kHz · 推奨設定です。"
+  ],
+  [
+    "WAV PCM 16-bit · 16 kHz · arquivo menor para fala.",
+    "WAV PCM 16-bit · 16 kHz · smaller file for speech.",
+    "WAV PCM 16-bit · 16 kHz · archivo más pequeño para voz.",
+    "WAV PCM 16 bits · 16 kHz · fichier plus léger pour la parole.",
+    "WAV PCM 16 Bit · 16 kHz · kleinere Datei für Sprache.",
+    "WAV PCM 16 位 · 16 kHz · 更适合语音的小文件。",
+    "WAV PCM 16-bit · 16 kHz · 音声向けの小さいファイルです。"
+  ],
+  [
+    "Reduzir ruído constante no áudio",
+    "Reduce steady noise in the audio",
+    "Reducir ruido constante del audio",
+    "Réduire le bruit continu de l’audio",
+    "Gleichmäßiges Rauschen im Audio reduzieren",
+    "降低音频中的持续噪声",
+    "音声の定常ノイズを低減"
+  ],
+  [
+    "Exportar em estéreo",
+    "Export in stereo",
+    "Exportar en estéreo",
+    "Exporter en stéréo",
+    "In Stereo exportieren",
+    "导出为立体声",
+    "ステレオで書き出す"
+  ],
+  [
+    "O estéreo duplica a voz mono nos dois canais. A redução de ruído pode alterar o timbre; use-a só se notar chiado constante.",
+    "Stereo duplicates the mono voice across both channels. Noise reduction can change the voice; use it only when you hear steady hiss.",
+    "El estéreo duplica la voz mono en ambos canales. La reducción de ruido puede cambiar la voz; úsala solo si hay siseo constante.",
+    "La stéréo duplique la voix mono sur les deux canaux. La réduction du bruit peut modifier la voix ; utilisez-la seulement en cas de souffle constant.",
+    "Stereo gibt die Monostimme auf beiden Kanälen aus. Rauschminderung kann die Stimme verändern; nur bei gleichmäßigem Rauschen aktivieren.",
+    "立体声会将单声道人声复制到左右声道。降噪可能改变音色，仅在有持续底噪时使用。",
+    "ステレオではモノラル音声を左右のチャンネルに複製します。ノイズ低減で声質が変わることがあるため、一定のノイズがある場合のみ使用してください。"
+  ],
+  [
+    "Áudio {value_0} pronto. Você também pode encontrá-lo no Histórico.",
+    "{value_0} audio is ready. You can also find it in History.",
+    "El audio {value_0} está listo. También está en el Historial.",
+    "L’audio {value_0} est prêt. Vous le trouverez aussi dans l’historique.",
+    "{value_0}-Audio ist bereit. Sie finden es auch im Verlauf.",
+    "{value_0} 音频已就绪，也可在历史记录中找到。",
+    "{value_0} 音声の準備ができました。履歴からも確認できます。"
+  ],
+  [
+    "04 / Resultado",
+    "04 / Result",
+    "04 / Resultado",
+    "04 / Résultat",
+    "04 / Ergebnis",
+    "04 / 结果",
+    "04 / 結果"
+  ],
+  [
+    "Baixar áudio",
+    "Download audio",
+    "Descargar audio",
+    "Télécharger l’audio",
+    "Audio herunterladen",
+    "下载音频",
+    "音声をダウンロード"
+  ],
+  [
+    "Converte o contêiner e mantém o áudio sem aplicar efeitos.",
+    "Converts the container without applying effects.",
+    "Convierte el formato sin aplicar efectos.",
+    "Convertit le format sans appliquer d’effets.",
+    "Konvertiert das Format ohne Effekte.",
+    "转换格式，不应用音效。",
+    "エフェクトを適用せず形式を変換します。"
+  ],
+  [
+    "Útil quando o áudio está baixo ou varia muito de volume.",
+    "Useful when audio is quiet or varies greatly in volume.",
+    "Útil si el audio está bajo o varía mucho de volumen.",
+    "Utile lorsque le volume est faible ou très variable.",
+    "Nützlich bei leiser oder stark schwankender Lautstärke.",
+    "适用于音量太低或变化较大的音频。",
+    "音量が小さい、または大きく変動する音声に便利です。"
+  ],
+  [
+    "Reduz chiado ou ruído estável; não separa voz de música e pode deixar artefatos.",
+    "Reduces hiss or steady noise; it cannot separate voice from music and may add artifacts.",
+    "Reduce siseo o ruido estable; no separa voz y música y puede generar artefactos.",
+    "Réduit le souffle ou le bruit stable ; ne sépare pas la voix de la musique et peut créer des artefacts.",
+    "Reduziert gleichmäßiges Rauschen, trennt aber keine Stimme von Musik und kann Artefakte erzeugen.",
+    "降低持续噪声，但不能分离人声和音乐，可能产生伪影。",
+    "一定のノイズを低減します。声と音楽は分離できず、音に影響する場合があります。"
+  ],
+  [
+    "Remove silêncio longo nas extremidades; não edita pausas internas da fala.",
+    "Removes long silence at the beginning and end; it does not edit pauses within speech.",
+    "Elimina silencios largos al inicio y al final; no modifica las pausas internas.",
+    "Supprime les longs silences au début et à la fin, sans modifier les pauses internes.",
+    "Entfernt lange Stille am Anfang und Ende, aber keine Pausen innerhalb der Sprache.",
+    "删除开头和结尾的长静音，不会剪辑语音内部的停顿。",
+    "冒頭と末尾の長い無音を削除します。話し声の途中の間は編集しません。"
+  ],
+  [
+    "Exporta uma cópia em WAV ou MP3 sem alterar o original.",
+    "Exports a WAV or MP3 copy and leaves the original unchanged.",
+    "Exporta una copia WAV o MP3 y conserva el original.",
+    "Exporte une copie WAV ou MP3 sans modifier l’original.",
+    "Exportiert eine WAV- oder MP3-Kopie und lässt das Original unverändert.",
+    "导出 WAV 或 MP3 副本，不修改原文件。",
+    "元のファイルを変更せず、WAV または MP3 のコピーを書き出します。"
+  ],
+  [
+    "O arquivo original permanece intacto; o resultado é salvo como uma nova cópia.",
+    "The original file stays unchanged; the result is saved as a new copy.",
+    "El archivo original no cambia; el resultado se guarda como una copia nueva.",
+    "Le fichier original reste intact ; le résultat est enregistré dans une nouvelle copie.",
+    "Die Originaldatei bleibt unverändert; das Ergebnis wird als neue Kopie gespeichert.",
+    "原文件保持不变；结果将另存为新文件。",
+    "元のファイルはそのままで、結果を新しいコピーとして保存します。"
   ]
 ]

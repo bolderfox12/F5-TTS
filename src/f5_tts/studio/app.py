@@ -23,6 +23,16 @@ body { background: #f3f6f8; color: #172c37; font-family: Inter, system-ui, sans-
 .studio-title { font-size: 30px; font-weight: 700; letter-spacing: -1px; }
 .studio-muted { color: #627781; }
 .studio-nav { width: 100%; justify-content: flex-start; padding: 12px 16px; border-radius: 10px; }
+.studio-nav { color: #d6e8ea; margin: 3px 0; border-left: 3px solid transparent; transition: transform .2s ease, background .25s ease, border-color .25s ease, box-shadow .25s ease; animation: nav-enter .35s both; }
+.studio-nav:hover { transform: translateX(5px); background: rgba(81,193,183,.13); border-left-color: #59c8ba; }
+.studio-nav-active { background: linear-gradient(100deg,rgba(48,163,154,.28),rgba(48,163,154,.06)); border-left-color: #73ded1; box-shadow: inset 0 0 20px rgba(83,203,191,.08); }
+.studio-tool-card { background: linear-gradient(145deg,#fff,#f1f8f8); transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease; }
+.studio-tool-card:hover { transform: translateY(-4px); border-color: #9bcac6; box-shadow: 0 12px 24px rgba(18,68,76,.10); }
+.studio-brand { background: linear-gradient(145deg,#1b6269,#102e38 78%); border: 1px solid rgba(116,220,207,.28); border-radius: 18px; padding: 16px; box-shadow: 0 12px 30px rgba(3,18,24,.28); animation: brand-glow 5s ease-in-out infinite; }
+.studio-nav-group { color: #82aaa9; font-size: 10px; letter-spacing: .16em; font-weight: 700; padding: 14px 12px 5px; }
+@keyframes nav-enter { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes brand-glow { 0%,100% { box-shadow: 0 12px 30px rgba(3,18,24,.25); } 50% { box-shadow: 0 12px 34px rgba(43,181,167,.19); } }
+@media(prefers-reduced-motion:reduce) { .studio-nav,.studio-brand,.studio-tool-card { animation:none; transition:none; } }
 .q-stepper { box-shadow: none; border: 1px solid #e0e8ec; border-radius: 18px; width: 100%; }
 .q-uploader { box-shadow: none; border: 1px dashed #75a9ad; width: 100%; }
 .q-field { width: 100%; }
@@ -45,26 +55,51 @@ def register_pages(service):
         ui.context.client.page.language = service.interface_language()
         ui.colors(primary="#137d80", secondary="#294d5b", accent="#2bb5a7")
         ui.add_css(CSS)
-        with ui.left_drawer(value=True).props("show-if-above bordered").classes("p-5") as drawer:
-            ui.label(t("F5 / STUDIO")).classes("text-xl font-bold mt-4")
-            ui.label(t("Seu espaço de voz")).classes("text-sm opacity-70 mb-8")
-            for title, icon, route in [
-                ("Criar áudio", "graphic_eq", "/"),
-                ("Minhas vozes", "record_voice_over", "/voices"),
-                ("Meus modelos", "inventory_2", "/models"),
-                ("Biblioteca de áudios", "folder_managed", "/files"),
-                ("Projetos de narração", "article", "/projects"),
-                ("Histórias e personagens", "auto_stories", "/stories"),
-                ("Transcrição e legendas", "subtitles", "/transcription"),
-                ("Regravar áudio", "mic", "/revoice"),
-                ("Ferramentas de áudio", "equalizer", "/audio-tools"),
-                ("Treinar uma voz", "school", "/training"),
-                ("Histórico", "history", "/history"),
-                ("Configurações", "tune", "/settings"),
-            ]:
-                ui.button(t(title), icon=icon, on_click=lambda target=route: ui.navigate.to(target)).props(
-                    "flat no-caps"
-                ).classes("studio-nav")
+        with ui.left_drawer(value=True).props("show-if-above bordered").classes("p-4") as drawer:
+            with ui.column().classes("studio-brand w-full gap-1 mb-5"):
+                with ui.row().classes("items-center gap-3"):
+                    ui.icon("graphic_eq", size="30px").classes("text-teal-200")
+                    ui.label(t("F5 / STUDIO")).classes("text-xl font-bold")
+                ui.label(t("Seu espaço de voz")).classes("text-sm opacity-75")
+            groups = [
+                (
+                    "CRIAR E EDITAR",
+                    [
+                        ("Criar áudio", "graphic_eq", "/"),
+                        ("Regravar áudio", "mic", "/revoice"),
+                        ("Ferramentas de áudio", "equalizer", "/audio-tools"),
+                    ],
+                ),
+                (
+                    "PROJETOS",
+                    [
+                        ("Histórias e personagens", "auto_stories", "/stories"),
+                        ("Projetos de narração", "article", "/projects"),
+                        ("Transcrição e legendas", "subtitles", "/transcription"),
+                    ],
+                ),
+                (
+                    "BIBLIOTECA",
+                    [
+                        ("Biblioteca de áudios", "folder_managed", "/files"),
+                        ("Minhas vozes", "record_voice_over", "/voices"),
+                        ("Meus modelos", "inventory_2", "/models"),
+                        ("Histórico", "history", "/history"),
+                    ],
+                ),
+                ("SISTEMA", [("Treinar uma voz", "school", "/training"), ("Configurações", "tune", "/settings")]),
+            ]
+            active_sections = {"Regravar com outra voz": "Regravar áudio"}
+            for group_name, items in groups:
+                ui.label(t(group_name)).classes("studio-nav-group")
+                for title, icon, route in items:
+                    active = title == active_sections.get(section, section)
+                    button = (
+                        ui.button(t(title), icon=icon, on_click=lambda target=route: ui.navigate.to(target))
+                        .props("flat no-caps")
+                        .classes("studio-nav" + (" studio-nav-active" if active else ""))
+                    )
+                    button.style(f"animation-delay:{items.index((title, icon, route)) * 35}ms")
             ui.space()
             ui.label(t("EXECUÇÃO LOCAL")).classes("text-xs tracking-widest opacity-60")
             ui.label(t("Os modelos são carregados quando você precisa deles.")).classes("text-sm opacity-75")
@@ -189,6 +224,56 @@ def register_pages(service):
                     text = ui.textarea(
                         label=t("Texto para narrar"), placeholder=t("Digite ou cole seu texto aqui…")
                     ).props("outlined rows=7")
+                    ui.label(t("03 / Saída do áudio")).classes("font-semibold text-lg")
+                    with ui.row().classes("w-full items-start gap-4 flex-wrap"):
+                        output_format = (
+                            ui.select({"wav": "WAV", "mp3": "MP3"}, value="wav", label=t("Formato de saída"))
+                            .props("outlined")
+                            .style("flex:1 1 150px")
+                        )
+                        output_quality = (
+                            ui.select(
+                                {
+                                    "high": t("Alta qualidade"),
+                                    "standard": t("Padrão"),
+                                    "compact": t("Arquivo compacto"),
+                                },
+                                value="standard",
+                                label=t("Qualidade do arquivo"),
+                            )
+                            .props("outlined")
+                            .style("flex:1 1 200px")
+                        )
+                    quality_help = ui.label("").classes("text-sm studio-muted")
+
+                    def explain_quality():
+                        if output_format.value == "mp3":
+                            rates = {"high": "320", "standard": "192", "compact": "128"}
+                            quality_help.set_text(
+                                t(
+                                    "MP3: {value_0} kbps; menor bitrate gera arquivos menores.",
+                                    value_0=rates[output_quality.value],
+                                )
+                            )
+                        else:
+                            descriptions = {
+                                "high": t("WAV PCM 24-bit · 24 kHz · maior fidelidade e arquivo maior."),
+                                "standard": t("WAV PCM 16-bit · 24 kHz · equilíbrio recomendado."),
+                                "compact": t("WAV PCM 16-bit · 16 kHz · arquivo menor para fala."),
+                            }
+                            quality_help.set_text(descriptions[output_quality.value])
+
+                    output_format.on_value_change(explain_quality)
+                    output_quality.on_value_change(explain_quality)
+                    explain_quality()
+                    with ui.row().classes("w-full gap-5 flex-wrap"):
+                        remove_noise = ui.checkbox(t("Reduzir ruído constante no áudio"), value=False)
+                        stereo = ui.checkbox(t("Exportar em estéreo"), value=False)
+                    ui.label(
+                        t(
+                            "O estéreo duplica a voz mono nos dois canais. A redução de ruído pode alterar o timbre; use-a só se notar chiado constante."
+                        )
+                    ).classes("text-xs studio-muted")
                     status = ui.label(t("Pronto para começar.")).classes("studio-muted")
 
                     async def generate():
@@ -204,12 +289,21 @@ def register_pages(service):
                                 trained_project.value,
                                 trained_checkpoint.value,
                                 saved_model.value,
+                                output_format.value,
+                                output_quality.value,
+                                remove_noise.value,
+                                stereo.value,
                             )
                             if result:
                                 generated.update(result)
                                 player.set_source(result["path"])
                                 download.enable()
-                                status.set_text(t("Áudio pronto. Você também pode encontrá-lo no Histórico."))
+                                status.set_text(
+                                    t(
+                                        "Áudio {value_0} pronto. Você também pode encontrá-lo no Histórico.",
+                                        value_0=output_format.value.upper(),
+                                    )
+                                )
                             else:
                                 status.set_text(t("Geração não concluída. Confira a mensagem e tente novamente."))
                         finally:
@@ -222,10 +316,10 @@ def register_pages(service):
                     )
                 with ui.column().classes("w-full md:w-1/3 gap-5"):
                     with ui.card().classes("studio-card w-full"):
-                        ui.label(t("03 / Resultado")).classes("font-semibold text-lg")
+                        ui.label(t("04 / Resultado")).classes("font-semibold text-lg")
                         player = ui.audio("").classes("w-full")
                         download = ui.button(
-                            t("Baixar WAV"), icon="download", on_click=lambda: ui.download.file(generated["path"])
+                            t("Baixar áudio"), icon="download", on_click=lambda: ui.download.file(generated["path"])
                         ).props("flat no-caps")
                         download.disable()
                     with ui.card().classes("studio-card w-full"):
