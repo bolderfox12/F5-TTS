@@ -5,6 +5,7 @@ from pathlib import Path
 
 from nicegui import app, run, ui
 
+from f5_tts.studio.local_pages import register_local_pages
 from f5_tts.studio.service import StudioService
 
 
@@ -42,6 +43,10 @@ def register_pages(service):
             for title, icon, route in [
                 ("Criar áudio", "graphic_eq", "/"),
                 ("Minhas vozes", "record_voice_over", "/voices"),
+                ("Projetos de narração", "article", "/projects"),
+                ("Transcrição e legendas", "subtitles", "/transcription"),
+                ("Regravar áudio", "mic", "/revoice"),
+                ("Ferramentas de áudio", "equalizer", "/audio-tools"),
                 ("Treinar uma voz", "school", "/training"),
                 ("Histórico", "history", "/history"),
                 ("Configurações", "tune", "/settings"),
@@ -78,6 +83,8 @@ def register_pages(service):
             on_upload=lambda event: receive(event, paths, label),
             on_rejected=lambda: ui.notify("Arquivo recusado. O limite é 100 MB por arquivo.", type="warning"),
         ).props('accept=".wav,.mp3,.flac,.ogg,.m4a,.aac"').classes("w-full")
+
+    register_local_pages(service, shell, action, audio_upload)
 
     @ui.page("/")
     def create_audio():
@@ -468,6 +475,37 @@ def register_pages(service):
                 ui.label(
                     "CUDA acelera o cálculo. TensorRT é uma otimização de execução e não está integrado a este estúdio."
                 ).classes("studio-muted")
+            with ui.expansion("Dicionário de pronúncia", icon="spellcheck").classes("w-full"):
+                ui.label(
+                    "Uma regra por linha. A substituição vale para o texto gerado, mantendo o roteiro original salvo."
+                ).classes("studio-muted")
+                pronunciation = ui.textarea(
+                    "Palavra = como ler",
+                    value="\n".join(
+                        f"{key} = {value}" for key, value in service.read().get("pronunciations", {}).items()
+                    ),
+                ).props("outlined rows=5")
+
+                async def save_pronunciations():
+                    try:
+                        await run.io_bound(service.set_pronunciations, pronunciation.value)
+                        ui.notify("Dicionário salvo. Gere novamente os trechos afetados.", type="positive")
+                    except Exception as error:
+                        ui.notify(str(error), type="negative")
+
+                ui.button("Salvar pronúncias", on_click=save_pronunciations).props("no-caps")
+            with ui.card().classes("studio-card w-full"):
+                ui.label("Downloads de transcrição e tradução").classes("font-semibold text-lg")
+                cache_only = ui.switch(
+                    "Usar somente modelos já baixados nessas duas ferramentas",
+                    value=service.read().get("offline", False),
+                )
+                ui.label(
+                    "Ative depois de baixar os modelos. Geração e treinamento também precisam de seus pesos no cache para uso sem internet."
+                ).classes("studio-muted text-sm")
+                ui.button(
+                    "Salvar preferência de cache", on_click=lambda: action(service.set_offline, cache_only.value)
+                ).props("flat no-caps")
             with ui.card().classes("studio-card w-full"):
                 device = ui.select(
                     {"auto": "Automático", "cuda": "NVIDIA / CUDA", "cpu": "CPU"},
