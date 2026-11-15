@@ -11,10 +11,11 @@ from uuid import uuid4
 import soundfile as sf
 import torch
 
+from f5_tts.studio.local_tools import LocalTools
 from f5_tts.train.guided_training import TrainingProject, import_ready_audio
 
 
-class StudioService:
+class StudioService(LocalTools):
     def __init__(self, home=None, data_root=None, backend=None, model_factory=None):
         self.home = Path(home or Path.home() / ".f5tts-studio").resolve()
         self.data_root = Path(data_root or files("f5_tts").joinpath("../../data")).resolve()
@@ -29,6 +30,8 @@ class StudioService:
         self._operation = threading.Lock()
         self._storage = threading.RLock()
         self._stop_requested = threading.Event()
+        self.render_status = ""
+        self._render_cancel = threading.Event()
         self.job = {"running": False, "message": "Nenhum treinamento em execução.", "project": ""}
 
     def read(self):
@@ -63,9 +66,12 @@ class StudioService:
         suffix = Path(filename).suffix.lower()
         if suffix not in (".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"):
             raise ValueError("Escolha um arquivo WAV, MP3, FLAC, OGG, M4A ou AAC.")
-        return self.uploads / (uuid4().hex + suffix)
+        stem = "".join(c if c.isalnum() or c in "-_." else "_" for c in Path(filename).stem)[:60]
+        return self.uploads / (uuid4().hex + "-" + stem + suffix)
 
     def managed_upload(self, path):
+        if not path:
+            raise ValueError("Envie uma gravação pelo aplicativo primeiro.")
         path = Path(path).resolve()
         if not path.is_relative_to(self.uploads) or not path.is_file():
             raise ValueError("Envie uma gravação pelo aplicativo primeiro.")
@@ -135,7 +141,8 @@ class StudioService:
             elif checkpoint:
                 raise ValueError("O checkpoint precisa pertencer a um projeto.")
             settings = data["settings"]
-            key = (checkpoint or "", vocabulary, settings["device"])
+            version = self.model_version(checkpoint)
+            key = (checkpoint or "", vocabulary, settings["device"], version)
             if self._model_key != key:
                 self._model = None
                 gc.collect()
@@ -154,10 +161,11 @@ class StudioService:
                 self._model_key = key
             identifier = uuid4().hex
             path = self.outputs / (identifier + ".wav")
+            spoken_text = self.pronounce(text.strip(), data.get("pronunciations", {}))
             self._model.infer(
                 ref_file=reference,
                 ref_text=transcript or "",
-                gen_text=text.strip(),
+                gen_text=spoken_text,
                 nfe_step=settings["steps"],
                 speed=settings["speed"],
                 seed=42,
@@ -168,10 +176,12 @@ class StudioService:
             entry = {
                 "id": identifier,
                 "text": text.strip(),
+                "spoken_text": spoken_text,
                 "path": str(path),
                 "voice": voice_id,
                 "project": project,
                 "checkpoint": checkpoint,
+                "model_version": version,
                 "steps": settings["steps"],
                 "speed": settings["speed"],
                 "created_at": datetime.now(timezone.utc).isoformat(),
