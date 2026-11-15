@@ -100,6 +100,27 @@ def register_pages(service):
                     reference_text = ui.textarea(
                         label="O que é dito na referência? (opcional)", placeholder="Vazio: transcrição automática."
                     ).props("outlined rows=2")
+                    with ui.expansion("Usar um modelo que eu treinei", icon="school").classes("w-full"):
+                        trained_project = ui.select(
+                            service.projects(), label="Projeto treinado (opcional)", clearable=True
+                        ).props("outlined")
+                        trained_checkpoint = ui.select({}, label="Checkpoint para usar").props("outlined")
+
+                        async def choose_model():
+                            trained_checkpoint.set_value(None)
+                            if not trained_project.value:
+                                trained_checkpoint.set_options({})
+                                return
+                            models = await action(service.checkpoints, trained_project.value)
+                            if models is not None:
+                                trained_checkpoint.set_options({model: Path(model).name for model in models})
+                                if not models:
+                                    ui.notify(
+                                        "O projeto ainda não tem checkpoints. Conclua um treino primeiro.", type="info"
+                                    )
+
+                        trained_project.on_value_change(choose_model)
+                        ui.label("Sem projeto selecionado, é usado o modelo original.").classes("studio-muted text-sm")
                     ui.separator()
                     ui.label("02 / O roteiro").classes("font-semibold text-lg")
                     text = ui.textarea(label="Texto para narrar", placeholder="Digite ou cole seu texto aqui…").props(
@@ -117,6 +138,8 @@ def register_pages(service):
                                 paths[-1] if paths else None,
                                 reference_text.value,
                                 voice.value,
+                                trained_project.value,
+                                trained_checkpoint.value,
                             )
                             if result:
                                 generated.update(result)
