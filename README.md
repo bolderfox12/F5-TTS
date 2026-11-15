@@ -25,6 +25,23 @@
 
 ## Alterações deste fork
 
+- **Novo F5 Studio (NiceGUI):** interface com menu lateral para criar áudio, salvar vozes, treinar por etapas, consultar o histórico e configurar CPU/CUDA. Inclui o treinamento e Python 3.15.2. Disponível na branch [`studio/nicegui`](https://github.com/bolderfox12/F5-TTS/tree/studio/nicegui), no [PR #4](https://github.com/bolderfox12/F5-TTS/pull/4).
+
+### Abrir a nova interface
+
+Depois de instalar Python/PyTorch e criar o ambiente conforme as instruções:
+
+```bash
+git fetch origin
+git switch studio/nicegui
+python -m pip install -e ".[studio]"
+f5-tts_studio
+```
+
+Abra `http://127.0.0.1:7862`. As [instruções completas do estúdio](https://github.com/bolderfox12/F5-TTS/tree/studio/nicegui#novo-f5-studio--interface-nicegui) incluem Windows e uso da GPU.
+A interface ainda está em revisão. TensorRT não foi integrado; CUDA utiliza o backend PyTorch existente. Geração e treinamento reais com GPU ainda precisam ser validados.
+
+
 - **Treinamento guiado com áudios prontos:** envie vários arquivos, escolha o idioma, gere transcrições, revise e aprove antes de treinar. Depois teste checkpoints e registre avaliações. Disponível na branch [`training/guided`](https://github.com/bolderfox12/F5-TTS/tree/training/guided), no [PR #3](https://github.com/bolderfox12/F5-TTS/pull/3). Veja as [instruções de abertura](https://github.com/bolderfox12/F5-TTS/tree/training/guided#treinamento-guiado--novo-assistente).
 
 - **Python 3.15.2:** instalação e dependências atualizadas; leitura e gravação de áudio sem TorchCodec obrigatório. Disponível na branch [`python/latest-stable`](https://github.com/bolderfox12/F5-TTS/tree/python/latest-stable), no [PR #2](https://github.com/bolderfox12/F5-TTS/pull/2).
