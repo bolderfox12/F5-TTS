@@ -49,6 +49,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+studio = ["nicegui>=4.0.0,<5"]
 eval = [
     "faster_whisper==0.10.1",
     "funasr",
@@ -62,6 +63,7 @@ eval = [
 Homepage = "https://github.com/SWivid/F5-TTS"
 
 [project.scripts]
+"f5-tts_studio" = "f5_tts.studio.app:main"
 "f5-tts_infer-cli" = "f5_tts.infer.infer_cli:main"
 "f5-tts_infer-gradio" = "f5_tts.infer.infer_gradio:main"
 "f5-tts_finetune-cli" = "f5_tts.train.finetune_cli:main"
