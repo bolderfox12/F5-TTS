@@ -37,6 +37,7 @@ def parse_args():
         "--batch_size_type", type=str, default="frame", choices=["frame", "sample"], help="Batch size type"
     )
     parser.add_argument("--max_samples", type=int, default=64, help="Max sequences per batch")
+    parser.add_argument("--num_workers", type=int, default=16, help="CPU data loader workers")
     parser.add_argument("--grad_accumulation_steps", type=int, default=1, help="Gradient accumulation steps")
     parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Max gradient norm for clipping")
     parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
@@ -206,6 +207,7 @@ def main():
 
     trainer.train(
         train_dataset,
+        num_workers=args.num_workers,
         resumable_with_seed=666,  # seed for shuffling dataset
     )
 

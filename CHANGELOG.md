@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.4.0 — 2026-11-15
+
+### Added
+
+- Rebuilt voice training into data review, GPU tuning, checkpoint comparison, and inference publishing areas.
+- Upload a compatible starting checkpoint and vocabulary; persist architecture, precision, frame batch,
+  gradient accumulation/clipping, data-loader workers, learning rate, warmup, epochs, and checkpoint retention.
+- Live GPU dashboard with VRAM use and optional `nvidia-smi` utilization, temperature, and power readings.
+- Compare multiple retained checkpoints using one saved reference and the same test phrase; rate samples and
+  optionally save an approved generated sample as a reusable voice reference.
+- Register a selected training checkpoint in My models without copying its weights.
+- My models inventory reports disk use, protects models referenced by story/narration/training projects,
+  and can remove managed checkpoint files after confirmation.
+- Files page to copy, move, download, and delete generated audio, saved references, and subtitle files.
+  Moving updates History, voice, transcript, and narration paths; external copies remain manageable locally.
+
+### Updated
+
+- English README documents the new training, model storage, and file library workflows.
+- F5 fine-tuning CLI accepts a configurable number of CPU data-loader workers.
+
 ## 1.3.0 — 2026-11-15
 
 ### Added

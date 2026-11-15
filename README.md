@@ -7,8 +7,8 @@
 A local web studio for creating speech, saved voices, narrated stories, subtitles, and voice models.
 F5 Studio uses [F5-TTS](https://github.com/SWivid/F5-TTS) for speech synthesis and runs processing on your computer.
 
-**Version 1.3.0:** seven interface languages and a character-based story editor for audio dramas,
-audiobooks, short episodes, and YouTube storytelling. See the [release notes](docs/releases/v1.3.0.md)
+**Version 1.4.0:** an expanded training workspace, checkpoint comparison and publishing, model storage
+management, and a local file library. See the [release notes](docs/releases/v1.4.0.md)
 and [changelog](CHANGELOG.md).
 
 ## What you can do
@@ -17,13 +17,14 @@ and [changelog](CHANGELOG.md).
 | --- | --- |
 | Create audio | Record or upload a reference, select a voice and model, generate speech, and download WAV. |
 | My voices | Keep named reference recordings and transcripts for reuse. |
-| My models | Register your own checkpoints and vocabularies alongside the original English/Chinese model. |
+| My models | Inspect model files and disk usage, register checkpoints, and remove managed weights when they are no longer needed. |
+| Files | Organize generated audio, voice references, and captions; copy, move, download, or delete local files. |
 | Stories and characters | Build a cast, assign each character a voice and model, write dialogue, and export the complete story. |
 | Narration projects | Work with paragraph-based narration, voice assignments, segment edits, pauses, and WAV/SRT export. |
 | Transcription and subtitles | Transcribe locally, correct segments, translate subtitles, and export TXT/SRT. |
 | Revoice | Create a new narration from revised or translated text with the chosen voice and model. |
 | Audio tools | Convert WAV/MP3, adjust volume, reduce steady noise, and trim silence with FFmpeg. |
-| Train a voice | Import recordings, review and approve examples, prepare data, fine-tune, and compare checkpoints. |
+| Train a voice | Review recordings, tune GPU training, upload a starting checkpoint, compare saved versions, and publish a selected checkpoint for inference. |
 | History | Replay and download generated audio, with its model and generation settings. |
 | Settings | Choose CPU/CUDA, speed, generation steps, pronunciation rules, and cache preferences. |
 
@@ -195,6 +196,50 @@ to the original files, which must stay accessible.
 
 Select a registered model in **Create audio**, **Revoice**, or each story character's model field.
 The original English/Chinese F5-TTS option stays available. Switching does not replace other checkpoints.
+
+The model library shows each registered checkpoint's size and whether it is used by a story or
+narration. Models in use are protected from removal. For an uploaded checkpoint managed by the
+Studio, choose **Remove** and confirm whether to delete the weights from disk. Files registered
+from outside the Studio can be removed from the library without deleting the original file.
+
+## Manage generated files
+
+Open **Files** to review generated WAV files, saved voice references, unused uploads, subtitles, and
+transcripts. Enter a destination path and choose whether to copy or move each file. A move updates
+the matching History, voice, narration, or transcript paths so the file remains available to the
+Studio. A copy leaves the source in place. Windows paths such as `C:\Users\YourName\Music\F5 Studio`
+are accepted when the Studio runs under WSL. Existing destination files are never overwritten.
+
+Deleting an audio file removes related History entries and invalidates narration audio that used
+it. A voice reference cannot be deleted while an existing story or narration uses that voice.
+
+## Train and compare voice checkpoints
+
+Open **Train a voice** and create a project or continue an existing one. The page is organized into
+four areas: **Data and transcripts**, **Training and GPU**, **Evaluate checkpoints**, and **Use for
+inference**.
+
+1. Import recordings from one speaker, review the transcripts, and approve only examples that are
+   clean and correctly transcribed. Training uses the approved real recordings; generated samples
+   are not automatically added to the training set.
+2. Optionally upload a compatible F5 checkpoint and its vocabulary to start from those weights.
+   If no starting checkpoint is provided, the first run uses the F5 base weights and may download
+   about 1.4 GB if they are not already cached.
+3. The GPU panel reports VRAM, current memory use, and—when `nvidia-smi` is available—GPU load,
+   temperature, and power. **Optimize for this GPU** sets a conservative frame batch, mixed
+   precision, and an 8-bit optimizer profile. Advanced controls include batch frames, examples per
+   batch, gradient accumulation and clipping, CPU data-loader workers, learning rate, epochs,
+   warmup, and checkpoint retention. Reduce the frame batch if training runs out of VRAM.
+4. Refresh the checkpoint list and select one or several versions. The comparison uses the same
+   voice reference and text for each selected checkpoint. Listen and rate each result; a good result
+   can be saved as a reusable voice reference.
+5. In **Use for inference**, register the selected checkpoint in **My models**. The checkpoint and
+   its matching vocabulary stay in their training locations; the app adds a library entry without
+   copying the weights.
+
+Training settings and starting weights are locked to a project's first training run. Create another
+project to experiment with a different architecture or base checkpoint. The Studio does not switch
+the active inference model automatically after training.
 A saved voice is a reference recording; a model contains the trained weights.
 
 ## Subtitles, audio tools, and training

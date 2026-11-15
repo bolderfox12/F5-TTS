@@ -5,12 +5,14 @@ from pathlib import Path
 
 from nicegui import app, run, ui
 
+from f5_tts.studio.file_pages import register_file_pages
 from f5_tts.studio.i18n import INTERFACE_LANGUAGES
 from f5_tts.studio.local_pages import register_local_pages
 from f5_tts.studio.microphone import Microphone
 from f5_tts.studio.model_pages import register_model_pages
 from f5_tts.studio.service import StudioService
 from f5_tts.studio.story_pages import register_story_pages
+from f5_tts.studio.training_pages import register_training_pages
 
 
 CSS = """
@@ -50,6 +52,7 @@ def register_pages(service):
                 ("Criar áudio", "graphic_eq", "/"),
                 ("Minhas vozes", "record_voice_over", "/voices"),
                 ("Meus modelos", "inventory_2", "/models"),
+                ("Arquivos", "folder_managed", "/files"),
                 ("Projetos de narração", "article", "/projects"),
                 ("Histórias e personagens", "auto_stories", "/stories"),
                 ("Transcrição e legendas", "subtitles", "/transcription"),
@@ -121,6 +124,8 @@ def register_pages(service):
     register_local_pages(service, shell, action, audio_upload)
     register_model_pages(service, shell, action)
     register_story_pages(service, shell, action)
+    register_training_pages(service, shell, action, audio_upload)
+    register_file_pages(service, shell, action)
 
     @ui.page("/")
     def create_audio():
@@ -276,251 +281,6 @@ def register_pages(service):
                         ui.button(t("Criar áudio"), on_click=lambda: ui.navigate.to("/")).props("flat no-caps")
 
             cards()
-
-    @ui.page("/training")
-    def training_page():
-        uploaded = []
-        state = {"project": "", "selected": "", "test": None}
-        with shell("Treinar uma voz"):
-            ui.label(t("Sua voz. Um passo de cada vez.")).classes("studio-title")
-            ui.label(
-                t(
-                    "Envie áudios prontos, revise os textos e ajuste uma cópia do modelo. Nada é treinado automaticamente."
-                )
-            ).classes("studio-muted")
-            with ui.stepper().props("vertical color=primary").classes("w-full") as stepper:
-                with ui.step("project", title=t("1. Criar ou abrir um projeto")):
-                    name = ui.input(t("Nome do projeto"), value=t("minha_voz")).props("outlined")
-                    available = service.projects()
-                    if available:
-                        ui.select(
-                            available,
-                            label=t("Ou continue um projeto salvo"),
-                            on_change=lambda e: name.set_value(e.value),
-                        ).props("outlined")
-                    project_status = ui.label(t("Use um nome sem espaços ou acentos."))
-
-                    async def open_project():
-                        project = await action(service.project, name.value)
-                        if project:
-                            state["project"] = project.name
-                            project_status.set_text(t("Projeto aberto: ") + project.name)
-                            rows.refresh()
-                            stepper.next()
-
-                    ui.button(t("Abrir e continuar"), icon="arrow_forward", on_click=open_project).props("no-caps")
-                with ui.step("upload", title=t("2. Enviar seus áudios prontos")):
-                    ui.markdown(
-                        t(
-                            "Selecione **um ou vários arquivos** da mesma pessoa. O aplicativo gera os textos e divide gravações longas. Depois você confere tudo. Não é preciso criar planilhas."
-                        )
-                    )
-                    ui.label(
-                        t("Prefira gravações sem música ou ruído. O primeiro uso baixa o modelo de transcrição.")
-                    ).classes("studio-muted")
-                    upload_status = ui.label(t("Nenhum arquivo enviado."))
-                    audio_upload(uploaded, upload_status, multiple=True)
-                    language = ui.select(
-                        {"pt": t("Português"), "en": t("Inglês"), "es": t("Espanhol"), "": t("Detectar idioma")},
-                        value="pt",
-                        label=t("Idioma das gravações"),
-                    ).props("outlined")
-                    consent = ui.checkbox(t("Tenho autorização para usar estas gravações no treinamento"))
-                    import_status = ui.label("").classes("whitespace-pre-wrap")
-
-                    async def import_audio():
-                        import_button.disable()
-                        import_status.set_text(
-                            t("Importando e transcrevendo… O processamento pode levar alguns minutos.")
-                        )
-                        try:
-                            result = await action(
-                                service.import_audio, state["project"], list(uploaded), language.value, consent.value
-                            )
-                            if result is not None:
-                                import_status.set_text(t(str(result)))
-                                uploaded.clear()
-                                rows.refresh()
-                        finally:
-                            import_button.enable()
-
-                    import_button = ui.button(
-                        t("Importar e gerar os textos"), icon="upload", on_click=import_audio
-                    ).props("no-caps")
-                    ui.button(t("Revisar exemplos"), icon="arrow_forward", on_click=stepper.next).props("flat no-caps")
-                with ui.step("review", title=t("3. Ouvir, corrigir e aprovar")):
-                    ui.label(
-                        t(
-                            "Selecione uma linha, ouça e confira se o texto corresponde à fala. Somente exemplos aprovados entram no treino."
-                        )
-                    ).classes("studio-muted")
-                    sample_audio = ui.audio("").classes("w-full")
-                    correction = ui.textarea(t("Texto correto")).props("outlined rows=3")
-                    approved = ui.checkbox(t("Ouvi este trecho e aprovo seu uso"))
-
-                    def select_sample(event):
-                        selected = event.selection
-                        if not selected:
-                            state["selected"] = ""
-                            return
-                        row = selected[0]
-                        state["selected"] = row["id"]
-                        correction.set_value(row["text"])
-                        approved.set_value(row["approved"])
-                        p = service.project(state["project"])
-                        sample_audio.set_source(str(p.path / "wavs" / (row["id"] + ".wav")))
-
-                    @ui.refreshable
-                    def rows():
-                        if not state["project"]:
-                            ui.label(t("Abra um projeto para ver os exemplos."))
-                            return
-                        p = service.project(state["project"])
-                        examples = p.read()["examples"]
-                        approved_examples = [example for example in examples if example["approved"]]
-                        ui.label(
-                            t(
-                                "{value_0} exemplos · {value_1} aprovados · {value_2} segundos aprovados",
-                                value_0=len(examples),
-                                value_1=len(approved_examples),
-                                value_2=round(sum(example["duration"] for example in approved_examples), 1),
-                            )
-                        )
-                        items = [
-                            {"id": row[0], "approved": row[1], "text": row[2], "seconds": row[3]} for row in p.rows()
-                        ]
-                        ui.table(
-                            columns=[
-                                {"name": "text", "label": t("Texto reconhecido"), "field": "text", "align": "left"},
-                                {"name": "approved", "label": t("Aprovado"), "field": "approved"},
-                                {"name": "seconds", "label": t("Segundos"), "field": "seconds"},
-                            ],
-                            rows=items,
-                            row_key="id",
-                            selection="single",
-                            on_select=select_sample,
-                            pagination=8,
-                        ).classes("w-full")
-
-                    rows()
-
-                    async def save_review():
-                        try:
-                            await run.io_bound(
-                                service.review, state["project"], state["selected"], correction.value, approved.value
-                            )
-                            ui.notify(t("Revisão salva."), type="positive")
-                            rows.refresh()
-                        except Exception as error:
-                            ui.notify(t(str(error)), type="negative")
-
-                    ui.button(t("Salvar revisão deste trecho"), icon="check", on_click=save_review).props("no-caps")
-                    prepare_status = ui.label("").classes("whitespace-pre-wrap")
-
-                    async def prepare():
-                        result = await action(service.prepare, state["project"])
-                        if result:
-                            prepare_status.set_text(t("Exemplos preparados."))
-                            stepper.next()
-
-                    ui.label(
-                        t(
-                            "Mínimo para testar o fluxo: 3 trechos e 15 segundos aprovados. Isso não é suficiente para garantir uma boa voz."
-                        )
-                    ).classes("text-sm studio-muted")
-                    ui.button(t("Preparar e continuar"), icon="arrow_forward", on_click=prepare).props("no-caps")
-                with ui.step("train", title=t("4. Treinar e acompanhar")):
-                    ui.markdown(
-                        t(
-                            "Requer **GPU NVIDIA/CUDA**. O modelo original é preservado. Novos treinos do mesmo projeto retomam seus checkpoints; crie outro projeto para um experimento independente."
-                        )
-                    )
-                    epochs = ui.select(
-                        {
-                            5: t("Teste rápido · 5 passagens"),
-                            20: t("Ajuste inicial · 20 passagens"),
-                            50: t("Ajuste prolongado · 50 passagens"),
-                        },
-                        value=5,
-                        label=t("Perfil de treinamento"),
-                    ).props("outlined")
-                    ui.label(t("Mais passagens não garantem melhoria. Comece pelo teste rápido.")).classes(
-                        "studio-muted"
-                    )
-
-                    async def start():
-                        try:
-                            await run.io_bound(service.start_training, state["project"], epochs.value)
-                            ui.notify(t("Treinamento iniciado."), type="positive")
-                        except Exception as error:
-                            ui.notify(t(str(error)), type="negative")
-
-                    with ui.row():
-                        ui.button(t("Iniciar treinamento"), icon="play_arrow", on_click=start).props("no-caps")
-                        ui.button(t("Parar"), icon="stop", on_click=lambda: action(service.stop_training)).props(
-                            "outline no-caps"
-                        )
-                    job = ui.label(t(service.job["message"])).classes(
-                        "whitespace-pre-wrap w-full bg-slate-100 p-4 rounded-lg text-sm"
-                    )
-                    ui.timer(1, lambda: job.set_text(t(service.job["message"])))
-                    ui.button(t("Testar uma versão"), icon="arrow_forward", on_click=stepper.next).props("flat no-caps")
-                with ui.step("test", title=t("5. Ouvir o resultado e avaliar")):
-                    checkpoint = ui.select({}, label=t("Versão treinada (checkpoint)")).props("outlined")
-
-                    async def refresh_checkpoints():
-                        result = await action(service.checkpoints, state["project"])
-                        if result is not None:
-                            checkpoint.set_options({p: Path(p).name for p in result})
-                            if not result:
-                                ui.notify(
-                                    t("Nenhum checkpoint ainda. Aguarde o treino salvar uma versão."), type="info"
-                                )
-
-                    ui.button(t("Buscar versões"), icon="refresh", on_click=refresh_checkpoints).props("flat no-caps")
-                    ref_paths = []
-                    ref_status = ui.label(t("Envie uma referência curta para comparar as versões."))
-                    audio_upload(ref_paths, ref_status, reference=True)
-                    ref_text = ui.textarea(t("Texto da referência (opcional)")).props("outlined rows=2")
-                    test_text = ui.textarea(
-                        t("Frase nova para testar"), value=t("Olá! Este é um teste da minha voz.")
-                    ).props("outlined rows=2")
-                    result_audio = ui.audio("").classes("w-full")
-
-                    async def test_voice():
-                        result = await action(
-                            service.generate,
-                            test_text.value,
-                            ref_paths[-1] if ref_paths else None,
-                            ref_text.value,
-                            None,
-                            state["project"],
-                            checkpoint.value,
-                        )
-                        if result:
-                            state["test"] = result
-                            result_audio.set_source(result["path"])
-
-                    ui.button(t("Gerar teste desta versão"), icon="play_arrow", on_click=test_voice).props("no-caps")
-                    rating = ui.radio({"Ficou bom": t("Ficou bom"), "Precisa melhorar": t("Precisa melhorar")})
-                    note = ui.textarea(t("O que precisa melhorar?")).props("outlined rows=2")
-
-                    async def rate():
-                        if not state["test"]:
-                            ui.notify(t("Gere um teste primeiro."), type="warning")
-                            return
-                        try:
-                            await run.io_bound(service.rate, state["test"]["id"], rating.value, note.value)
-                            ui.notify(t("Avaliação salva no histórico."), type="positive")
-                        except Exception as error:
-                            ui.notify(t(str(error)), type="negative")
-
-                    ui.button(t("Guardar avaliação"), icon="save", on_click=rate).props("no-caps")
-                    ui.label(
-                        t(
-                            "Avaliações não alteram os pesos. Para ensinar uma correção, envie um áudio correto, revise e treine novamente."
-                        )
-                    ).classes("studio-muted")
 
     @ui.page("/history")
     def history_page():

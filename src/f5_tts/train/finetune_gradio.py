@@ -5,6 +5,7 @@ import platform
 import queue
 import random
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -355,6 +356,7 @@ def start_training(
     stream,
     logger,
     ch_8bit_adam,
+    num_workers=16,
 ):
     global training_process, tts_api, stop_signal
 
@@ -419,16 +421,17 @@ def start_training(
         f" --keep_last_n_checkpoints {keep_last_n_checkpoints}"
         f" --last_per_updates {last_per_updates}"
         f" --dataset_name {dataset_name}"
+        f" --num_workers {int(num_workers)}"
     )
 
     if finetune:
         cmd += " --finetune"
 
     if file_checkpoint_train != "":
-        cmd += f' --pretrain "{file_checkpoint_train}"'
+        cmd += f" --pretrain {shlex.quote(file_checkpoint_train)}"
 
     if tokenizer_file != "":
-        cmd += f" --tokenizer_path {tokenizer_file}"
+        cmd += f" --tokenizer_path {shlex.quote(tokenizer_file)}"
 
     cmd += f" --tokenizer {tokenizer_type}"
 

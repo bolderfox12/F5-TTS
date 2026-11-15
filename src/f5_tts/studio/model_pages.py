@@ -15,6 +15,11 @@ def register_model_pages(service, shell, action):
                     "Cadastre seu modelo em português e escolha entre ele e o original na hora de gerar áudio. Uma voz salva é uma referência; o modelo define o que foi aprendido no treinamento."
                 )
             ).classes("studio-muted")
+            ui.label(
+                t(
+                    "O inventário mostra o espaço ocupado. Arquivos enviados ao Studio podem ser apagados daqui; modelos ainda usados em histórias ou narrações ficam protegidos."
+                )
+            ).classes("studio-muted")
             with ui.card().classes("studio-card w-full gap-4"):
                 name = ui.input(t("Nome do modelo"), placeholder=t("Ex.: Meu modelo em português")).props("outlined")
                 architecture = ui.select(
@@ -74,21 +79,99 @@ def register_model_pages(service, shell, action):
 
             @ui.refreshable
             def cards():
-                for model in service.models():
+                models = service.model_inventory()
+                total = sum(model["size"] for model in models)
+                ui.label(
+                    t(
+                        "{value_0} modelo(s) cadastrado(s) · {value_1} no disco",
+                        value_0=len(models),
+                        value_1=format_bytes(total),
+                    )
+                ).classes("font-semibold")
+                if not models:
+                    ui.label(t("Nenhum modelo personalizado cadastrado.")).classes("studio-muted")
+                for model in models:
                     with ui.card().classes("studio-card w-full"):
-                        ui.label(t(model["name"]) if model["id"] == "original" else model["name"]).classes(
-                            "font-semibold"
-                        )
+                        with ui.row().classes("w-full items-center"):
+                            ui.label(model["name"]).classes("font-semibold text-lg")
+                            ui.space()
+                            ui.badge(format_bytes(model["size"]), color="teal-1", text_color="teal-9")
                         ui.label(model["architecture"]).classes("text-sm studio-muted")
-                        if model["id"] == "original":
-                            ui.label(t("Sempre disponível. Seus modelos cadastrados não substituem este modelo."))
-                        else:
-                            ui.label(model["checkpoint"]).classes("text-sm break-all")
-                            ui.label(t("Vocabulário: ") + (model["vocabulary"] or "original")).classes(
-                                "text-sm break-all"
+                        if model.get("orphan"):
+                            ui.label(t("Arquivo de checkpoint enviado, ainda não cadastrado como modelo.")).classes(
+                                "text-sm studio-muted"
                             )
+                        ui.label(model["checkpoint"]).classes("text-sm break-all")
+                        ui.label(t("Vocabulário: ") + (model["vocabulary"] or t("original"))).classes(
+                            "text-sm break-all"
+                        )
+                        if not model["exists"]:
+                            ui.badge(t("Arquivo não encontrado"), color="red-1", text_color="red-9")
+                        if model["in_use"]:
+                            message = (
+                                t("Este checkpoint está selecionado como entrada de um treino.")
+                                if model.get("training_input")
+                                else t(
+                                    "Em uso por uma história ou projeto. Troque o modelo nesses trabalhos antes de remover."
+                                )
+                            )
+                            ui.label(message).classes("text-sm text-orange-9")
+                        with ui.dialog() as confirm, ui.card().classes("studio-card w-full max-w-xl"):
+                            ui.label(t("Remover modelo?")).classes("text-lg font-semibold")
+                            ui.label(
+                                t(
+                                    "O cadastro será removido. A exclusão dos arquivos gerenciados pelo Studio é opcional e libera espaço no disco."
+                                )
+                            ).classes("studio-muted")
+                            delete_files = ui.checkbox(
+                                t("Apagar também o checkpoint local"),
+                                value=model["managed"],
+                                disable=not model["managed"],
+                            )
+                            if model.get("project_checkpoint"):
+                                ui.label(
+                                    t(
+                                        "A exclusão apaga esta versão da pasta ckpts do projeto; os dados de treino e o vocabulário são preservados."
+                                    )
+                                ).classes("text-sm text-orange-9")
+                            ui.label(t("Arquivos externos e vocabulários compartilhados são preservados.")).classes(
+                                "text-sm studio-muted"
+                            )
+
+                            async def remove_model(item=model, checkbox=delete_files, dialog=confirm):
+                                freed = await action(service.delete_model, item["id"], checkbox.value)
+                                if freed is not None:
+                                    dialog.close()
+                                    cards.refresh()
+                                    if freed:
+                                        ui.notify(
+                                            t("Modelo removido. Espaço liberado: ") + format_bytes(freed),
+                                            type="positive",
+                                        )
+                                    else:
+                                        ui.notify(
+                                            t("Cadastro removido; os arquivos foram preservados."), type="positive"
+                                        )
+
+                            with ui.row().classes("w-full justify-end"):
+                                ui.button(t("Cancelar"), on_click=confirm.close).props("flat no-caps")
+                                ui.button(t("Remover modelo"), icon="delete", on_click=remove_model).props(
+                                    "color=negative no-caps"
+                                )
+                        with ui.row().classes("w-full justify-end"):
+                            ui.button(
+                                t("Remover"), icon="delete", on_click=confirm.open, disable=model["in_use"]
+                            ).props("flat no-caps")
                 ui.button(t("Ir para Criar áudio"), icon="graphic_eq", on_click=lambda: ui.navigate.to("/")).props(
                     "no-caps"
                 )
 
             cards()
+
+
+def format_bytes(size):
+    value = float(size)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024 or unit == "TB":
+            return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} B"
+        value /= 1024
