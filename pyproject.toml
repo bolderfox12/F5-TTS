@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "f5-tts"
-version = "1.1.22"
+version = "1.3.0"
 description = "F5-TTS: A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching"
 readme = "README.md"
 requires-python = ">=3.11,<3.16"
@@ -49,6 +49,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+studio = ["nicegui>=4.0.0,<5"]
 eval = [
     "faster_whisper==0.10.1",
     "funasr",
@@ -59,9 +60,13 @@ eval = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/SWivid/F5-TTS"
+Homepage = "https://github.com/bolderfox12/F5-TTS"
+
+[tool.setuptools.package-data]
+"f5_tts.studio" = ["*.js", "locales/*.json"]
 
 [project.scripts]
+"f5-tts_studio" = "f5_tts.studio.app:main"
 "f5-tts_infer-cli" = "f5_tts.infer.infer_cli:main"
 "f5-tts_infer-gradio" = "f5_tts.infer.infer_gradio:main"
 "f5-tts_finetune-cli" = "f5_tts.train.finetune_cli:main"
