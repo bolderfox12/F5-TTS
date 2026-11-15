@@ -184,6 +184,15 @@ class LocalTools:
             "steps": settings["steps"],
             "speed": settings["speed"],
         }
+        if block.get("model_id", "original") != "original":
+            model = next((m for m in data.get("models", []) if m["id"] == block["model_id"]), None)
+            payload["registered_model"] = model
+            payload["model_version"] = (
+                model_version
+                if model_version is not None
+                else self.model_version(model["checkpoint"] if model else None)
+            )
+            payload["vocabulary_version"] = self.model_version(model["vocabulary"] if model else None)
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
     def render_block(self, project_id, block_id):
@@ -196,6 +205,7 @@ class LocalTools:
             voice_id=block["voice"],
             project=block.get("model_project"),
             checkpoint=block.get("checkpoint"),
+            model_id=block.get("model_id", "original"),
         )
         signature = self.block_signature(
             block,
@@ -254,7 +264,11 @@ class LocalTools:
             if rate != 24000:
                 mono = torchaudio.functional.resample(mono, rate, 24000)
             audio_parts.append(mono.numpy())
-            segments.append({"start": cursor / 24000, "end": (cursor + len(mono)) / 24000, "text": block["text"]})
+            character = next(
+                (c["name"] for c in project.get("characters", []) if c["id"] == block.get("character")), None
+            )
+            caption = f"{character}: {block['text']}" if character else block["text"]
+            segments.append({"start": cursor / 24000, "end": (cursor + len(mono)) / 24000, "text": caption})
             cursor += len(mono)
             if index < len(project["blocks"]) - 1:
                 pause = np.zeros(round(block["pause"] * 24000), dtype=np.float32)
@@ -271,7 +285,11 @@ class LocalTools:
         with self._storage:
             data = self.read()
             current = next(p for p in data["narrations"] if p["id"] == project_id)
-            if current["blocks"] != project["blocks"]:
+            if (
+                current["blocks"] != project["blocks"]
+                or current.get("characters") != project.get("characters")
+                or not all(self.block_ready(block) for block in current["blocks"])
+            ):
                 raise ValueError("O roteiro foi alterado durante a exportação. Exporte novamente.")
             current["mix"] = result
             self.write(data)

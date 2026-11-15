@@ -3,16 +3,17 @@ export default {
     <div class="column q-gutter-sm">
       <div class="row items-center q-gutter-sm">
         <q-btn v-if="!recording" icon="mic" color="primary" no-caps
-          label="Gravar pelo microfone" :disable="requesting || sending" @click="start" />
-        <q-btn v-else icon="stop" color="negative" no-caps label="Parar gravação" @click="stop" />
-        <span v-if="recording" role="status">Gravando: {{ seconds }} / 30 s</span>
+          :label="labels.start" :disable="requesting || sending" @click="start" />
+        <q-btn v-else icon="stop" color="negative" no-caps :label="labels.stop" @click="stop" />
+        <span v-if="recording" role="status">{{ labels.recording }} {{ seconds }} / 30 s</span>
       </div>
-      <div class="text-caption">Fale de 1 a 30 segundos. Prefira até 12 segundos, em um ambiente sem música.</div>
+      <div class="text-caption">{{ labels.hint }}</div>
       <audio v-if="preview" :src="preview" controls class="full-width" />
       <q-btn v-if="preview" icon="check" color="primary" outline no-caps
-        label="Usar esta gravação" :loading="sending" :disable="used || recording || requesting" @click="use" />
+        :label="labels.use" :loading="sending" :disable="used || recording || requesting" @click="use" />
       <div role="status" aria-live="polite" :class="error ? 'text-negative' : 'text-grey-8'">{{ message }}</div>
     </div>`,
+  props: { labels: Object },
   data() {
     return { recording: false, requesting: false, sending: false, used: false, seconds: 0,
       preview: '', message: '', error: false, recorder: null, stream: null,
@@ -35,10 +36,10 @@ export default {
       if (this.requesting || this.recording || this.sending) return;
       this.requesting = true;
       this.error = false;
-      this.message = 'Permita o uso do microfone no navegador.';
+      this.message = this.labels.permission;
       try {
         if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder)
-          throw new Error('Use um navegador atualizado e abra o Studio em localhost ou 127.0.0.1.');
+          throw new Error(this.labels.unsupported);
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         if (this.disposed) { stream.getTracks().forEach(track => track.stop()); return; }
         this.stream = stream;
@@ -50,7 +51,7 @@ export default {
         recorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
         recorder.onerror = () => {
           this.error = true;
-          this.message = 'Não foi possível concluir a gravação. Tente novamente.';
+          this.message = this.labels.failed;
           this.stop();
           this.release();
         };
@@ -61,7 +62,7 @@ export default {
           this.blob = new Blob(chunks, { type: recorder.mimeType });
           if (this.preview) URL.revokeObjectURL(this.preview);
           this.preview = URL.createObjectURL(this.blob);
-          this.message = 'Ouça e clique em “Usar esta gravação”, ou grave novamente.';
+          this.message = this.labels.preview;
         };
         recorder.start();
         if (this.preview) URL.revokeObjectURL(this.preview);
@@ -70,7 +71,7 @@ export default {
         this.used = false;
         this.seconds = 0;
         this.recording = true;
-        this.message = 'Microfone ligado.';
+        this.message = this.labels.active;
         const started = performance.now();
         this.timer = setInterval(() => {
           this.seconds = Math.min(30, Math.floor((performance.now() - started) / 1000));
@@ -80,11 +81,11 @@ export default {
         this.release();
         this.error = true;
         const messages = {
-          NotAllowedError: 'Acesso ao microfone negado. Permita o microfone nas configurações deste site no navegador.',
-          NotFoundError: 'Nenhum microfone encontrado. Conecte um microfone e tente novamente.',
-          NotReadableError: 'O microfone está indisponível ou em uso por outro programa.',
+          NotAllowedError: this.labels.denied,
+          NotFoundError: this.labels.missing,
+          NotReadableError: this.labels.busy,
         };
-        this.message = messages[error.name] || error.message || 'Não foi possível abrir o microfone.';
+        this.message = messages[error.name] || error.message || this.labels.open_failed;
       } finally { this.requesting = false; }
     },
     stop() {
@@ -96,11 +97,11 @@ export default {
       if (!this.blob || this.sending || this.used) return;
       if (!this.blob.size || this.blob.size > 600000) {
         this.error = true;
-        this.message = 'Grave um trecho mais curto para usar como referência.';
+        this.message = this.labels.too_large;
         return;
       }
       this.sending = true;
-      this.message = 'Preparando referência…';
+      this.message = this.labels.preparing;
       try {
         const data = await new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -117,7 +118,7 @@ export default {
       this.sending = false;
       this.used = success;
       this.error = !success;
-      this.message = success ? 'Gravação selecionada como referência.' : 'Não foi possível usar a gravação. Grave de 1 a 30 segundos e tente novamente.';
+      this.message = success ? this.labels.selected : this.labels.retry;
     },
   },
 };

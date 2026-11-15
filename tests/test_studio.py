@@ -258,6 +258,7 @@ class StudioRouteTests(unittest.TestCase):
                 for route, expected in [
                     ("/voices", "Suas vozes"),
                     ("/models", "Seus modelos"),
+                    ("/stories", "Uma história"),
                     ("/training", "Enviar seus"),
                     ("/history", "Tudo o que"),
                     ("/settings", "Controle o"),

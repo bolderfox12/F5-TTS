@@ -47,7 +47,9 @@ jobs:
           wheel, = Path('dist').glob('*.whl')
           with zipfile.ZipFile(wheel) as archive:
               required = {'f5_tts/studio/app.py', 'f5_tts/studio/microphone.py',
-                          'f5_tts/studio/microphone.js', 'f5_tts/studio/model_pages.py'}
+                          'f5_tts/studio/microphone.js', 'f5_tts/studio/model_pages.py',
+                          'f5_tts/studio/i18n.py', 'f5_tts/studio/locales/messages.json',
+                          'f5_tts/studio/story_pages.py', 'f5_tts/studio/story_tools.py'}
               assert required <= set(archive.namelist())
               metadata = archive.read(f'f5_tts-{version}.dist-info/METADATA').decode()
               assert f'Version: {version}\n' in metadata

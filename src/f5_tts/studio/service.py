@@ -16,11 +16,13 @@ from uuid import uuid4
 import soundfile as sf
 import torch
 
+from f5_tts.studio.i18n import INTERFACE_LANGUAGES, translate
 from f5_tts.studio.local_tools import LocalTools
+from f5_tts.studio.story_tools import StoryTools
 from f5_tts.train.guided_training import TrainingProject, import_ready_audio
 
 
-class StudioService(LocalTools):
+class StudioService(StoryTools, LocalTools):
     def __init__(self, home=None, data_root=None, backend=None, model_factory=None):
         self.home = Path(home or Path.home() / ".f5tts-studio").resolve()
         self.data_root = Path(data_root or files("f5_tts").joinpath("../../data")).resolve()
@@ -34,6 +36,9 @@ class StudioService(LocalTools):
         self._model_key = None
         self._operation = threading.Lock()
         self._storage = threading.RLock()
+        self._interface_language = self.read().get("ui_language", "pt-BR")
+        if self._interface_language not in INTERFACE_LANGUAGES:
+            self._interface_language = "pt-BR"
         self._stop_requested = threading.Event()
         self.render_status = ""
         self._render_cancel = threading.Event()
@@ -53,6 +58,27 @@ class StudioService(LocalTools):
             path = self.home / (uuid4().hex + ".tmp")
             path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             path.replace(self.home / "workspace.json")
+
+    def interface_language(self):
+        return self._interface_language
+
+    def set_interface_language(self, locale):
+        if locale not in INTERFACE_LANGUAGES:
+            raise ValueError("Escolha um idioma de interface disponível.")
+        with self._storage:
+            data = self.read()
+            data["ui_language"] = locale
+            self.write(data)
+            self._interface_language = locale
+
+    def translate_ui(self, text, **values):
+        return translate(text, self.interface_language(), **values)
+
+    def model_choices(self):
+        return {
+            model["id"]: self.translate_ui(model["name"]) if model["id"] == "original" else model["name"]
+            for model in self.models()
+        }
 
     def backend(self):
         if self._backend is None:

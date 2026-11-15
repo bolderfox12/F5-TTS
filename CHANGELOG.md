@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.3.0 — 2026-11-15
+
+### Added
+
+- Persistent interface language selection: English, Brazilian Portuguese, Spanish, French,
+  German, Simplified Chinese, and Japanese, using bundled offline message catalogs.
+- Localized page navigation, forms, status/error messages, microphone controls, training steps,
+  and built-in examples, while preserving user text, names, voice IDs, and model IDs.
+- Stories and characters: cast management, one voice and model per character, and automatic
+  parsing of `Character: dialogue` scripts, including full-width colons for Chinese/Japanese.
+- Dialogue, YouTube, and short-drama templates; per-turn editing, pauses, ordering, and removal.
+- Complete story WAV, speaker-labeled SRT, and editable character-script TXT downloads.
+- Reuse of unchanged dialogue audio and checkpoint/vocabulary-aware model invalidation.
+- Browser integration checks for seven languages, three voice references, story editing,
+  downloads, and preservation of saved stories when changing the interface language.
+
+### Updated
+
+- Focus the English README on the current Studio web interface, removing obsolete Gradio,
+  specialized runtime, legacy CLI, and unrelated deployment instructions.
+- Keep existing paragraph narration projects and workspaces compatible.
+- Include translation catalogs and story modules in release-package checks.
+
 ## 1.2.0 — 2026-11-15
 
 ### Added
