@@ -48,7 +48,7 @@ navegador: `f5-tts_studio --no-browser`.
 
 | Área | Como usar |
 | --- | --- |
-| Criar áudio | Escolha uma voz salva ou envie referência curta, escreva o roteiro, gere, ouça e baixe WAV. |
+| Criar áudio | Escolha uma voz salva ou envie referência curta, selecione opcionalmente um checkpoint treinado, escreva o roteiro, gere, ouça e baixe WAV. |
 | Minhas vozes | Salve referências e transcrições com nomes fáceis de encontrar. Salvar uma referência não treina o modelo. |
 | Treinar uma voz | Crie/abra projeto, envie vários áudios, gere textos, revise cada trecho, aprove, prepare, treine e teste checkpoints. |
 | Histórico | Reproduza e baixe os áudios gerados; os testes guardam projeto, checkpoint e avaliações. |
