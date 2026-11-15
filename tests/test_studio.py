@@ -58,6 +58,19 @@ class StudioTests(unittest.TestCase):
         self.service.rate(entry["id"], "Precisa melhorar", "Pronúncia")
         self.assertEqual(self.service.read()["history"][0]["note"], "Pronúncia")
 
+    def test_generation_can_use_a_trained_checkpoint(self):
+        project = self.service.project("trained_voice")
+        vocabulary = project.path / "vocab.txt"
+        vocabulary.write_text("a\nb\n")
+        checkpoint = str(self.root / "model_last.pt")
+        self.service._backend = SimpleNamespace(get_checkpoints_project=lambda *args: ([checkpoint], checkpoint))
+        result = self.service.generate("New narration", self.reference, project=project.name, checkpoint=checkpoint)
+        self.assertEqual(self.service._model.options["ckpt_file"], checkpoint)
+        self.assertEqual(self.service._model.options["vocab_file"], str(vocabulary))
+        self.assertEqual(result["checkpoint"], checkpoint)
+        with self.assertRaises(ValueError):
+            self.service.generate("New narration", self.reference, project=project.name, checkpoint="unregistered.pt")
+
     def test_invalid_inputs_never_load_a_model(self):
         with self.assertRaises(ValueError):
             self.service.generate("", self.reference)
