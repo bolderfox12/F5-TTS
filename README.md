@@ -131,6 +131,40 @@ O runtime especializado Triton/TensorRT-LLM em `src/f5_tts/runtime/` mantém seu
 ambiente próprio e não foi migrado nem validado com Python 3.15.
 Os extras de avaliação (`.[eval]`) também precisam de validação independente.
 
+### Treinamento guiado — novo assistente
+
+Na branch `training/guided` (baseada na atualização Python 3.15.2):
+
+```bash
+git switch training/guided
+python -m pip install -e .
+f5-tts_finetune-gradio --port 7861
+```
+
+No Windows sem ativar o ambiente, use `.\.venv\Scripts\f5-tts_finetune-gradio.exe --port 7861`.
+Abra `http://127.0.0.1:7861` e escolha **Comece aqui · Treinamento guiado**:
+
+1. **Projeto:** crie um nome ou abra um projeto já salvo.
+2. **Áudios prontos:** arraste um ou vários arquivos, escolha o idioma e clique em Importar e gerar textos. A transcrição é automática e os áudios longos são divididos. Também há uma opção para gravação pelo microfone ou transcrição manual.
+3. **Revisão:** ouça, corrija os textos, marque os exemplos aprovados, salve e prepare.
+4. **Treinamento:** escolha um perfil, inicie e acompanhe; o botão Parar interrompe o processo.
+5. **Teste:** busque checkpoints, gere uma frase e registre se ficou bom ou o que precisa melhorar.
+
+Os exemplos são convertidos para WAV mono / 24 kHz e ficam na pasta de dados do projeto.
+Cada trecho precisa ter 1–30 s; prefira 3–12 s. Três exemplos totalizando 15 s são apenas o
+mínimo para experimentar o fluxo, não uma recomendação de dados suficientes para uma boa voz.
+Os exemplos precisam ser aprovados explicitamente. Edições invalidam os dados preparados.
+Avaliações ficam salvas em `reviewed_examples.json`; elas não atualizam os pesos automaticamente.
+Para ensinar uma correção, adicione uma gravação correta e prepare/treine novamente.
+
+O assistente é voltado ao ajuste fino de F5-TTS v1 com GPU NVIDIA/CUDA e configurações simples
+(sem logger externo e sem otimizador de 8 bits). O primeiro treino baixa o checkpoint base.
+Os arquivos são mantidos em `data/<projeto>_pinyin` e `ckpts/<projeto>`; para projetos anteriores,
+use as abas avançadas. Os presets retomam checkpoints do mesmo projeto quando disponíveis;
+para um experimento independente, crie outro projeto.
+Não há promessa de melhoria: compare checkpoints com a mesma referência e uma frase nova.
+Os controles técnicos de vocabulário, transcrição e treinamento continuam nas abas avançadas.
+
 ### Runtime
 
 Deployment solution with Triton and TensorRT-LLM.
