@@ -6,6 +6,8 @@ from pathlib import Path
 from nicegui import app, run, ui
 
 from f5_tts.studio.local_pages import register_local_pages
+from f5_tts.studio.microphone import Microphone
+from f5_tts.studio.model_pages import register_model_pages
 from f5_tts.studio.service import StudioService
 
 
@@ -43,6 +45,7 @@ def register_pages(service):
             for title, icon, route in [
                 ("Criar áudio", "graphic_eq", "/"),
                 ("Minhas vozes", "record_voice_over", "/voices"),
+                ("Meus modelos", "inventory_2", "/models"),
                 ("Projetos de narração", "article", "/projects"),
                 ("Transcrição e legendas", "subtitles", "/transcription"),
                 ("Regravar áudio", "mic", "/revoice"),
@@ -73,7 +76,20 @@ def register_pages(service):
         except Exception as error:
             ui.notify(str(error), type="negative")
 
-    def audio_upload(paths, label, multiple=False):
+    def audio_upload(paths, label, multiple=False, reference=False, on_reference=None):
+        if reference:
+            async def receive_recording(event):
+                result = await action(service.microphone_reference, event.args)
+                if result:
+                    paths.append(result)
+                    if on_reference:
+                        on_reference()
+                    label.set_text("Gravação do microfone selecionada como referência.")
+                    ui.notify("Referência pronta para usar.", type="positive")
+                recorder.run_method("finish", result is not None)
+
+            recorder = Microphone(receive_recording).classes("w-full")
+            ui.label("Ou envie um áudio pronto:").classes("studio-muted text-sm")
         ui.upload(
             label="Arraste os áudios ou clique para escolher",
             multiple=multiple,
@@ -85,6 +101,7 @@ def register_pages(service):
         ).props('accept=".wav,.mp3,.flac,.ogg,.m4a,.aac"').classes("w-full")
 
     register_local_pages(service, shell, action, audio_upload)
+    register_model_pages(service, shell, action)
 
     @ui.page("/")
     def create_audio():
@@ -99,14 +116,19 @@ def register_pages(service):
                     ui.label("01 / A voz").classes("font-semibold text-lg")
                     voices = {v["id"]: v["name"] for v in service.read()["voices"]}
                     voice = ui.select(voices, label="Voz salva (opcional)", clearable=True)
-                    ui.label("Ou envie uma referência curta. Prefira até 12 segundos, sem música.").classes(
+                    ui.label("Grave pelo microfone ou envie uma referência curta. Prefira até 12 segundos, sem música.").classes(
                         "studio-muted"
                     )
                     upload_status = ui.label("Nenhum arquivo enviado.").classes("text-sm")
-                    audio_upload(paths, upload_status)
+                    audio_upload(paths, upload_status, reference=True, on_reference=lambda: voice.set_value(None))
                     reference_text = ui.textarea(
                         label="O que é dito na referência? (opcional)", placeholder="Vazio: transcrição automática."
                     ).props("outlined rows=2")
+                    saved_model = ui.select(
+                        {model["id"]: model["name"] for model in service.models()},
+                        value="original", label="Modelo para gerar áudio",
+                    ).props("outlined")
+                    ui.link("Cadastrar meu modelo em português ou outro checkpoint", "/models").classes("text-sm")
                     with ui.expansion("Usar um modelo que eu treinei", icon="school").classes("w-full"):
                         trained_project = ui.select(
                             service.projects(), label="Projeto treinado (opcional)", clearable=True
@@ -114,6 +136,8 @@ def register_pages(service):
                         trained_checkpoint = ui.select({}, label="Checkpoint para usar").props("outlined")
 
                         async def choose_model():
+                            if trained_project.value:
+                                saved_model.set_value("original")
                             trained_checkpoint.set_value(None)
                             if not trained_project.value:
                                 trained_checkpoint.set_options({})
@@ -127,7 +151,10 @@ def register_pages(service):
                                     )
 
                         trained_project.on_value_change(choose_model)
-                        ui.label("Sem projeto selecionado, é usado o modelo original.").classes("studio-muted text-sm")
+                        saved_model.on_value_change(
+                            lambda: trained_project.set_value(None) if saved_model.value != "original" else None
+                        )
+                        ui.label("Sem projeto selecionado, é usado o modelo escolhido acima.").classes("studio-muted text-sm")
                     ui.separator()
                     ui.label("02 / O roteiro").classes("font-semibold text-lg")
                     text = ui.textarea(label="Texto para narrar", placeholder="Digite ou cole seu texto aqui…").props(
@@ -147,6 +174,7 @@ def register_pages(service):
                                 voice.value,
                                 trained_project.value,
                                 trained_checkpoint.value,
+                                saved_model.value,
                             )
                             if result:
                                 generated.update(result)
@@ -192,7 +220,7 @@ def register_pages(service):
             with ui.card().classes("studio-card w-full"):
                 name = ui.input("Nome da voz", placeholder="Ex.: Minha narração").props("outlined")
                 upload_status = ui.label("Envie uma gravação curta.")
-                audio_upload(paths, upload_status)
+                audio_upload(paths, upload_status, reference=True)
                 transcript = ui.textarea("Transcrição da referência (opcional)").props("outlined rows=2")
                 consent = ui.checkbox("Tenho autorização para usar esta gravação")
 
@@ -397,7 +425,7 @@ def register_pages(service):
                     ui.button("Buscar versões", icon="refresh", on_click=refresh_checkpoints).props("flat no-caps")
                     ref_paths = []
                     ref_status = ui.label("Envie uma referência curta para comparar as versões.")
-                    audio_upload(ref_paths, ref_status)
+                    audio_upload(ref_paths, ref_status, reference=True)
                     ref_text = ui.textarea("Texto da referência (opcional)").props("outlined rows=2")
                     test_text = ui.textarea("Frase nova para testar", value="Olá! Este é um teste da minha voz.").props(
                         "outlined rows=2"
@@ -451,8 +479,8 @@ def register_pages(service):
                 with ui.card().classes("studio-card w-full"):
                     ui.label(entry["text"]).classes("font-semibold")
                     ui.label(entry["created_at"][:19].replace("T", " ") + " UTC").classes("text-xs studio-muted")
-                    if entry["checkpoint"]:
-                        ui.label("Modelo: " + Path(entry["checkpoint"]).name).classes("text-sm studio-muted")
+                    if entry.get("model_name") or entry["checkpoint"]:
+                        ui.label("Modelo: " + (entry.get("model_name") or Path(entry["checkpoint"]).name)).classes("text-sm studio-muted")
                     ui.audio(entry["path"]).classes("w-full")
                     ui.button(
                         "Baixar WAV", icon="download", on_click=lambda path=entry["path"]: ui.download.file(path)

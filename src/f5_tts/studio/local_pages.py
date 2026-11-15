@@ -364,18 +364,28 @@ def register_local_pages(service, shell, action, audio_upload):
                 voice = ui.select({v["id"]: v["name"] for v in service.read()["voices"]}, label="Voz de destino").props(
                     "outlined"
                 )
+                saved_model = ui.select(
+                    {model["id"]: model["name"] for model in service.models()},
+                    value="original", label="Modelo para regravar",
+                ).props("outlined")
+                ui.link("Cadastrar outro modelo", "/models").classes("text-sm")
                 trained_model = ui.select(
                     service.projects(), label="Usar um projeto treinado (opcional)", clearable=True
                 ).props("outlined")
                 trained_version = ui.select({}, label="Checkpoint do projeto treinado").props("outlined")
 
                 async def choose_version():
+                    if trained_model.value:
+                        saved_model.set_value("original")
                     trained_version.set_value(None)
                     versions = await action(service.checkpoints, trained_model.value) if trained_model.value else []
                     if versions is not None:
                         trained_version.set_options({version: Path(version).name for version in versions})
 
                 trained_model.on_value_change(choose_version)
+                saved_model.on_value_change(
+                    lambda: trained_model.set_value(None) if saved_model.value != "original" else None
+                )
                 ui.label(
                     "A qualidade e o idioma da voz dependem do checkpoint F5-TTS. Os modelos originais são voltados a inglês e chinês."
                 ).classes("studio-muted text-sm")
@@ -385,7 +395,8 @@ def register_local_pages(service, shell, action, audio_upload):
                         ui.notify("Escolha uma voz salva.", type="warning")
                         return
                     result = await action(
-                        service.generate, text.value, None, "", voice.value, trained_model.value, trained_version.value
+                        service.generate, text.value, None, "", voice.value, trained_model.value, trained_version.value,
+                        saved_model.value,
                     )
                     if result:
                         state["output"] = result

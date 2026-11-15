@@ -62,6 +62,9 @@ eval = [
 [project.urls]
 Homepage = "https://github.com/SWivid/F5-TTS"
 
+[tool.setuptools.package-data]
+"f5_tts.studio" = ["*.js"]
+
 [project.scripts]
 "f5-tts_studio" = "f5_tts.studio.app:main"
 "f5-tts_infer-cli" = "f5_tts.infer.infer_cli:main"

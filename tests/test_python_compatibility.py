@@ -30,6 +30,23 @@ class CompatibilityTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             save_audio("unused.wav", torch.zeros(8), 24000)
 
+    def test_wav_export_prevents_clipping_without_boosting_quiet_audio(self):
+        import numpy as np
+        import soundfile as sf
+
+        from f5_tts.api import F5TTS
+
+        api = F5TTS.__new__(F5TTS)  # No checkpoint download needed for export.
+        api.target_sample_rate = 24000
+        for source in (np.array([-2.0, -1.0, 0.0, 1.0, 2.0]), np.array([-0.5, 0.0, 0.5])):
+            with self.subTest(peak=np.max(np.abs(source))), tempfile.TemporaryDirectory() as folder:
+                path = Path(folder) / "export.wav"
+                api.export_wav(source, path)
+                actual, rate = sf.read(path)
+                expected = source * (0.99 / 2) if np.max(np.abs(source)) > 1 else source
+                self.assertEqual(rate, 24000)
+                np.testing.assert_allclose(actual, expected, atol=4e-5)
+
     def test_model_forward_backward(self):
         model = DiT(dim=64, depth=1, heads=2, dim_head=32, mel_dim=8, text_dim=16)
         audio = torch.randn(1, 16, 8)

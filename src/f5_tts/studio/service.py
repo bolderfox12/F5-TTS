@@ -1,11 +1,16 @@
 """Persistent, single-user workspace. Models are loaded only when requested."""
 
+import base64
+import binascii
 import gc
 import json
+import shutil
+import subprocess
+import tempfile
 import threading
 from datetime import datetime, timezone
 from importlib.resources import files
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from uuid import uuid4
 
 import soundfile as sf
@@ -69,6 +74,35 @@ class StudioService(LocalTools):
         stem = "".join(c if c.isalnum() or c in "-_." else "_" for c in Path(filename).stem)[:60]
         return self.uploads / (uuid4().hex + "-" + stem + suffix)
 
+    def microphone_reference(self, encoded):
+        """Convert a short browser recording to a managed, validated PCM WAV."""
+        if not isinstance(encoded, str) or not encoded or len(encoded) > 800000:
+            raise ValueError("Gravação inválida ou muito grande. Grave um trecho de até 30 segundos.")
+        try:
+            audio = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error) as error:
+            raise ValueError("Não foi possível ler a gravação do microfone.") from error
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            raise ValueError("Instale o FFmpeg para usar gravações do microfone.")
+        output = self.upload_path("microfone.wav")
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                source = Path(folder) / "recording"
+                source.write_bytes(audio)
+                subprocess.run(
+                    [ffmpeg, "-nostdin", "-v", "error", "-y", "-i", str(source),
+                     "-vn", "-t", "30", "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", str(output)],
+                    check=True, capture_output=True, timeout=30,
+                )
+            return self.validate_reference(output)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            output.unlink(missing_ok=True)
+            raise ValueError("Não foi possível converter a gravação. Grave novamente.") from error
+        except Exception:
+            output.unlink(missing_ok=True)
+            raise
+
     def managed_upload(self, path):
         if not path:
             raise ValueError("Envie uma gravação pelo aplicativo primeiro.")
@@ -120,7 +154,51 @@ class StudioService(LocalTools):
         p = self.project(project)
         return self.backend().get_checkpoints_project(p.name, False)[0]
 
-    def generate(self, text, reference=None, transcript="", voice_id=None, project=None, checkpoint=None):
+    def models(self):
+        return [{"id": "original", "name": "F5-TTS original · inglês / chinês",
+                 "checkpoint": "", "vocabulary": "", "architecture": "F5TTS_v1_Base"},
+                *self.read().get("models", [])]
+
+    @staticmethod
+    def local_model_file(value, suffixes):
+        value = str(value or "").strip().strip('"')
+        # Accept a Windows path pasted into the WSL-hosted Studio.
+        windows = PureWindowsPath(value)
+        if windows.drive and len(windows.drive) == 2 and not Path(value).is_absolute():
+            value = str(Path("/mnt") / windows.drive[0].lower() / Path(*windows.parts[1:]))
+        path = Path(value).expanduser().resolve()
+        if not value or not path.is_file() or path.suffix.lower() not in suffixes:
+            raise ValueError("Escolha um arquivo existente no formato indicado.")
+        return str(path)
+
+    def model_upload_path(self, filename):
+        suffix = Path(filename).suffix.lower()
+        if suffix not in (".pt", ".pth", ".ckpt", ".safetensors", ".txt"):
+            raise ValueError("Escolha um checkpoint .pt/.pth/.ckpt/.safetensors ou um vocabulário .txt.")
+        folder = self.home / "models"
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder / (uuid4().hex + suffix)
+
+    def register_model(self, name, checkpoint, vocabulary="", architecture="F5TTS_v1_Base"):
+        name = (name or "").strip()
+        if not name or len(name) > 100:
+            raise ValueError("Dê ao modelo um nome de até 100 caracteres.")
+        if architecture not in ("F5TTS_v1_Base", "F5TTS_Base", "E2TTS_Base"):
+            raise ValueError("Escolha a mesma arquitetura usada no treinamento.")
+        checkpoint = self.local_model_file(checkpoint, (".pt", ".pth", ".ckpt", ".safetensors"))
+        vocabulary = self.local_model_file(vocabulary, (".txt",)) if vocabulary else ""
+        with self._storage:
+            if any(model["name"].casefold() == name.casefold() for model in self.models()):
+                raise ValueError("Já existe um modelo com esse nome.")
+            data = self.read()
+            model = {"id": uuid4().hex, "name": name, "checkpoint": checkpoint,
+                     "vocabulary": vocabulary, "architecture": architecture}
+            data.setdefault("models", []).append(model)
+            self.write(data)
+        return model
+
+    def generate(self, text, reference=None, transcript="", voice_id=None, project=None, checkpoint=None,
+                 model_id="original"):
         if not text or not text.strip():
             raise ValueError("Escreva o texto que deseja transformar em voz.")
         if not self._operation.acquire(blocking=False):
@@ -134,15 +212,30 @@ class StudioService(LocalTools):
                 reference, transcript = voice["reference"], voice["transcript"]
             reference = self.validate_reference(reference or "")
             vocabulary = ""
+            architecture = "F5TTS_v1_Base"
+            model_name = "F5-TTS original · inglês / chinês"
             if project:
+                if model_id != "original":
+                    raise ValueError("Escolha um modelo salvo ou um projeto treinado, sem combinar os dois.")
                 if checkpoint not in self.checkpoints(project):
                     raise ValueError("Selecione um checkpoint do projeto.")
                 vocabulary = str(self.project(project).path / "vocab.txt")
+                model_name = project
             elif checkpoint:
                 raise ValueError("O checkpoint precisa pertencer a um projeto.")
+            else:
+                selected = next((model for model in self.models() if model["id"] == model_id), None)
+                if selected is None:
+                    raise ValueError("Selecione um modelo existente em Meus modelos.")
+                if model_id != "original":
+                    checkpoint = self.local_model_file(selected["checkpoint"], (".pt", ".pth", ".ckpt", ".safetensors"))
+                    vocabulary = (self.local_model_file(selected["vocabulary"], (".txt",))
+                                  if selected["vocabulary"] else "")
+                architecture, model_name = selected["architecture"], selected["name"]
             settings = data["settings"]
             version = self.model_version(checkpoint)
-            key = (checkpoint or "", vocabulary, settings["device"], version)
+            key = (checkpoint or "", vocabulary, architecture, settings["device"], version,
+                   self.model_version(vocabulary))
             if self._model_key != key:
                 self._model = None
                 gc.collect()
@@ -154,6 +247,7 @@ class StudioService(LocalTools):
 
                     factory = F5TTS
                 self._model = factory(
+                    model=architecture,
                     ckpt_file=checkpoint or "",
                     vocab_file=vocabulary,
                     device=None if settings["device"] == "auto" else settings["device"],
@@ -182,6 +276,9 @@ class StudioService(LocalTools):
                 "project": project,
                 "checkpoint": checkpoint,
                 "model_version": version,
+                "model_id": model_id if not project else None,
+                "model_name": model_name,
+                "architecture": architecture,
                 "steps": settings["steps"],
                 "speed": settings["speed"],
                 "created_at": datetime.now(timezone.utc).isoformat(),

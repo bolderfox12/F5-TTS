@@ -1,8 +1,10 @@
 """Studio service tests use synthetic audio and a fake model, never model downloads."""
 
 import http.client
+import base64
 import importlib.util
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -83,6 +85,77 @@ class StudioTests(unittest.TestCase):
         self.assertIsNone(self.service._model)
         self.assertFalse(self.service._operation.locked())
 
+    @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg required")
+    def test_microphone_recording_becomes_a_managed_reference(self):
+        encoded = base64.b64encode(self.reference.read_bytes()).decode("ascii")
+        path = self.service.microphone_reference(encoded)
+        self.assertNotEqual(path, str(self.reference))
+        self.assertEqual(self.service.validate_reference(path), path)
+        voice = self.service.save_voice("Microfone", path, "Hello world")
+        result = self.service.generate("New narration", voice_id=voice["id"])
+        self.assertTrue(Path(result["path"]).exists())
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg required")
+    def test_invalid_microphone_recordings_leave_no_partial_files(self):
+        before = set(self.service.uploads.iterdir())
+        for encoded in (None, "", "!not-base64!", "x" * 800001, base64.b64encode(b"not audio").decode()):
+            with self.subTest(encoded=str(encoded)[:20]), self.assertRaises(ValueError):
+                self.service.microphone_reference(encoded)
+        short = self.service.upload_path("too-short.wav")
+        save_audio(short, torch.zeros(1, 2400), 24000)
+        before.add(short)
+        with self.assertRaises(ValueError):
+            self.service.microphone_reference(base64.b64encode(short.read_bytes()).decode())
+        self.assertEqual(set(self.service.uploads.iterdir()), before)
+
+    def test_microphone_reports_missing_ffmpeg(self):
+        with patch("f5_tts.studio.service.shutil.which", return_value=None):
+            with self.assertRaisesRegex(ValueError, "FFmpeg"):
+                self.service.microphone_reference(base64.b64encode(b"audio").decode())
+
+    def test_saved_models_switch_without_replacing_original(self):
+        checkpoint = self.root / "portugues.pt"
+        checkpoint.write_bytes(b"fake checkpoint for orchestration")
+        vocabulary = self.root / "vocab.txt"
+        vocabulary.write_text("a\nb\n")
+        model = self.service.register_model("Português", checkpoint, vocabulary, "F5TTS_Base")
+        reopened = StudioService(self.service.home, self.service.data_root)
+        self.assertEqual(reopened.models()[1], model)
+        original = self.service.models()[0].copy()
+        portuguese = self.service.generate("Olá", self.reference, "Hello", model_id=model["id"])
+        first_model = self.service._model
+        self.assertEqual(first_model.options["ckpt_file"], str(checkpoint))
+        self.assertEqual(first_model.options["vocab_file"], str(vocabulary))
+        self.assertEqual(first_model.options["model"], "F5TTS_Base")
+        self.assertEqual(portuguese["model_name"], "Português")
+        self.service.generate("Outra frase", self.reference, "Hello", model_id=model["id"])
+        self.assertIs(self.service._model, first_model)
+        english = self.service.generate("Hello", self.reference, "Hello", model_id="original")
+        self.assertIsNot(self.service._model, first_model)
+        self.assertEqual(self.service._model.options["ckpt_file"], "")
+        self.assertEqual(self.service._model.options["model"], "F5TTS_v1_Base")
+        self.assertEqual(english["model_id"], "original")
+        self.assertEqual(self.service.models()[0], original)
+        self.assertTrue(checkpoint.exists())
+
+    def test_saved_models_validate_files_and_missing_selection(self):
+        with self.assertRaises(ValueError):
+            self.service.register_model("Português", self.root / "missing.pt")
+        with self.assertRaises(ValueError):
+            self.service.generate("Olá", self.reference, model_id="missing")
+        checkpoint = self.root / "portugues.pt"
+        checkpoint.write_bytes(b"fake")
+        registered = self.service.register_model("Português", checkpoint)
+        with self.assertRaises(ValueError):
+            self.service.register_model("português", checkpoint)
+        with self.assertRaises(ValueError):
+            self.service.register_model("Outro", checkpoint, architecture="unknown")
+        checkpoint.unlink()
+        with self.assertRaises(ValueError):
+            self.service.generate("Olá", self.reference, model_id=registered["id"])
+        self.assertIsNone(self.service._model)
+        self.assertFalse(self.service._operation.locked())
+
     def test_exclusive_operation_and_cuda_validation(self):
         self.service._operation.acquire()
         try:
@@ -152,14 +225,21 @@ class StudioRouteTests(unittest.TestCase):
                 "from f5_tts.studio.app import main; main()"
             )
             env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}
-            process = subprocess.Popen(
-                [sys.executable, "-c", entry, "--no-browser", "--port", "17862", "--workspace", folder],
-                env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # This child is a normal server, not a NiceGUI screen-test worker.
+            env.pop("PYTEST_CURRENT_TEST", None)
+            startup_log = Path(folder) / "startup.log"
+            with startup_log.open("w") as log:
+                process = subprocess.Popen(
+                    [sys.executable, "-c", entry, "--no-browser", "--port", "17862", "--workspace", folder],
+                    env=env,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                )
             try:
-                for _attempt in range(100):
+                # Cold imports on Windows-mounted WSL disks can exceed ten seconds.
+                timeout = float(os.environ.get("F5_STUDIO_TEST_STARTUP_TIMEOUT", "120"))
+                deadline = time.monotonic() + timeout
+                while time.monotonic() < deadline:
                     try:
                         connection = http.client.HTTPConnection("127.0.0.1", 17862, timeout=2)
                         connection.request("GET", "/")
@@ -169,14 +249,15 @@ class StudioRouteTests(unittest.TestCase):
                         break
                     except (ConnectionError, OSError):
                         if process.poll() is not None:
-                            self.fail("Studio server exited before startup")
+                            self.fail("Studio server exited before startup:\n" + startup_log.read_text())
                         time.sleep(0.1)
                 else:
-                    self.fail("Studio server did not start")
+                    self.fail("Studio server did not start:\n" + startup_log.read_text())
                 self.assertEqual(response.status, 200)
                 self.assertIn("Transforme texto em voz", body)
                 for route, expected in [
                     ("/voices", "Suas vozes"),
+                    ("/models", "Seus modelos"),
                     ("/training", "Enviar seus"),
                     ("/history", "Tudo o que"),
                     ("/settings", "Controle o"),

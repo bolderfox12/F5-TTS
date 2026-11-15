@@ -41,6 +41,58 @@ f5-tts_studio
 No Windows sem ativar o ambiente: use `.\.venv\Scripts\python.exe -m pip install -e ".[studio]"`
 e depois `.\.venv\Scripts\f5-tts_studio.exe`.
 
+### Gravar uma referência pelo microfone
+
+Em **Criar áudio**, **Minhas vozes** ou na referência de comparação do treinamento:
+
+1. Clique em **Gravar pelo microfone** e permita o microfone no navegador.
+2. Fale uma referência limpa e clique em **Parar gravação**. O limite automático é 30 segundos; prefira até 12.
+3. Ouça a prévia e clique em **Usar esta gravação**.
+4. Gere o áudio ou salve a voz, informando a transcrição da referência se já a souber.
+
+O microfone é desligado ao parar ou sair da página. A gravação só é enviada ao
+Studio local quando você clica em **Usar esta gravação**, e é convertida para WAV
+mono a 24 kHz pelo FFmpeg. O envio de arquivos prontos continua disponível.
+Abra o Studio em `http://127.0.0.1:7862` ou `http://localhost:7862`; para acesso por
+outro endereço, o navegador exige HTTPS para permitir o microfone.
+
+### Manter modelos em português e inglês
+
+Abra **Meus modelos**, dê um nome como **Meu modelo em português** e cadastre o
+checkpoint `.pt`, `.pth`, `.ckpt` ou `.safetensors`, junto do `vocab.txt` usado no
+treinamento. Você pode escolher os arquivos no computador ou colar seus caminhos
+locais. Caminhos Windows como `C:\\Modelos\\portugues.pt` também são aceitos quando
+o Studio roda no WSL. Selecione a mesma arquitetura usada no treinamento
+(F5-TTS v1 Base, F5-TTS Base ou E2-TTS Base). Deixe o vocabulário vazio somente se
+o treinamento manteve o vocabulário original.
+
+Em **Criar áudio**, escolha em **Modelo para gerar áudio**. Em **Regravar áudio**,
+use **Modelo para regravar**. O **F5-TTS original · inglês / chinês** permanece
+disponível, e você pode voltar a ele a qualquer momento. Cadastrar ou selecionar
+um modelo não substitui os outros; o Histórico registra qual modelo gerou cada
+áudio. Os pesos só são carregados quando você gera áudio. Projetos treinados no
+próprio Studio continuam disponíveis na opção de projeto treinado.
+
+O idioma e a qualidade dependem do checkpoint real: cadastrar um nome não treina
+nem converte o modelo. Arquivos enviados são guardados no workspace; caminhos
+colados continuam apontando para os arquivos originais, que precisam permanecer
+no mesmo local.
+
+### Verificar o Studio
+
+```bash
+python -m pytest tests -q -p no:cacheprovider
+```
+
+O teste HTTP aceita `F5_STUDIO_TEST_STARTUP_TIMEOUT` (padrão: 120 segundos), útil
+para imports lentos em discos Windows montados no WSL. Os testes de serviço usam
+modelos simulados; não baixam pesos. Para testar a interface em Linux com um
+microfone simulado, instale `playwright` e seu Chromium, inicie uma instância
+separada com `--port 7863 --no-browser --workspace /tmp/f5-studio-microphone-test`
+e execute `python testar-microfone-navegador.py`. Esse teste grava e converte áudio,
+salva uma voz, simula permissão negada, cadastra um modelo de teste sem carregá-lo
+e alterna entre ele e o original.
+
 ### Ferramentas locais disponíveis
 
 | Área | Fluxo |
