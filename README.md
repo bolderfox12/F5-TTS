@@ -1,6 +1,6 @@
 # F5-TTS: A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching
 
-[![python](https://img.shields.io/badge/Python-3.10-brightgreen)](https://github.com/SWivid/F5-TTS)
+[![python](https://img.shields.io/badge/Python-3.15.2-brightgreen)](https://github.com/bolderfox12/F5-TTS/tree/python/latest-stable)
 [![arXiv](https://img.shields.io/badge/arXiv-2410.06885-b31b1b.svg?logo=arXiv)](https://arxiv.org/abs/2410.06885)
 [![demo](https://img.shields.io/badge/GitHub-Demo-orange.svg)](https://swivid.github.io/F5-TTS/)
 [![hfspace](https://img.shields.io/badge/🤗-HF%20Space-yellow)](https://huggingface.co/spaces/mrfakename/E2-F5-TTS)
@@ -22,107 +22,129 @@
 - **2025/03/12**: 🔥 F5-TTS v1 base model with better training and inference performance. [Few demo](https://swivid.github.io/F5-TTS_updates).
 - **2024/10/08**: F5-TTS & E2 TTS base models on [🤗 Hugging Face](https://huggingface.co/SWivid/F5-TTS), [🤖 Model Scope](https://www.modelscope.cn/models/SWivid/F5-TTS_Emilia-ZH-EN), [🟣 Wisemodel](https://wisemodel.cn/models/SJTU_X-LANCE/F5-TTS_Emilia-ZH-EN).
 
-## Installation
 
-### Create a separate environment if needed
+## Alterações deste fork
+
+- **Python 3.15.2:** instalação e dependências atualizadas; leitura e gravação de áudio sem TorchCodec obrigatório. Disponível na branch [`python/latest-stable`](https://github.com/bolderfox12/F5-TTS/tree/python/latest-stable), no [PR #2](https://github.com/bolderfox12/F5-TTS/pull/2).
+- **Nova interface:** estúdio de voz com controles principais em português, visual verde-petróleo e fluxo em três etapas. Disponível na branch [`interface/estudio-voz-pt-br`](https://github.com/bolderfox12/F5-TTS/tree/interface/estudio-voz-pt-br), no [PR #1](https://github.com/bolderfox12/F5-TTS/pull/1).
+- **Verificações:** testes de compatibilidade com Python 3.15.2 em CPU e verificações de código aprovados no GitHub. Geração com checkpoints reais, treinamento completo e GPU ainda precisam de validação.
+
+As duas melhorias estão em revisão e ainda não foram integradas à `main`.
+Siga a seção de instalação para usar a branch de Python 3.15.2.
+
+## Instalação — Python 3.15.2
+
+> **Importante:** os ajustes de compatibilidade estão na branch
+> [`python/latest-stable`](https://github.com/bolderfox12/F5-TTS/tree/python/latest-stable)
+> ([PR #2](https://github.com/bolderfox12/F5-TTS/pull/2)). Faça o `git switch`
+> indicado abaixo antes de instalar. A branch `main` ainda não recebeu esses ajustes.
+
+Este fork foi atualizado para **CPython 3.15.2**, a versão estável mais recente
+verificada em 15/11/2026 ([Python.org](https://www.python.org/downloads/release/python-3152/)).
+Use a distribuição normal com GIL; builds free-threaded não foram validados.
+A instalação, importação, leitura/gravação de WAV e execução forward/backward de
+um modelo pequeno são testadas em CPU. Isso não equivale a validar treinamento
+completo, checkpoints, qualidade de voz ou todos os aceleradores.
+
+### 1. Pré-requisitos
+
+- Git, Python 3.15.2 e FFmpeg/ffprobe disponíveis no terminal.
+- NVIDIA: driver compatível com a versão CUDA do PyTorch escolhido.
+- Windows: instalar o FFmpeg e adicionar sua pasta `bin` ao PATH.
+- Ubuntu/Debian: `sudo apt-get install ffmpeg libsndfile1`.
+- macOS com Homebrew: `brew install ffmpeg libsndfile`.
+
+Confira: `ffmpeg -version`, `ffprobe -version` e `git --version`.
+
+### 2. Baixar este fork e criar um ambiente isolado
 
 ```bash
-# Create a conda env with python_version>=3.10  (you could also use virtualenv)
-conda create -n f5-tts python=3.11
-conda activate f5-tts
-
-# Install FFmpeg if you haven't yet
-conda install ffmpeg
+git clone https://github.com/bolderfox12/F5-TTS.git
+cd F5-TTS
+# Enquanto esta atualização estiver em revisão:
+git switch python/latest-stable
 ```
 
-### Install PyTorch with matched device
+**Windows (PowerShell):**
 
-<details>
-<summary>NVIDIA GPU</summary>
+```powershell
+py -3.15 -m venv .venv
+# A ativação é opcional: estes comandos usam diretamente o Python do ambiente.
+.\.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+```
 
-> ```bash
-> # Install pytorch with your CUDA version, e.g.
-> pip install torch==2.8.0+cu128 torchaudio==2.8.0+cu128 --extra-index-url https://download.pytorch.org/whl/cu128
-> 
-> # And also possible previous versions, e.g.
-> pip install torch==2.4.0+cu124 torchaudio==2.4.0+cu124 --extra-index-url https://download.pytorch.org/whl/cu124
-> # etc.
-> ```
+**Linux/macOS:**
 
-</details>
-
-<details>
-<summary>AMD GPU</summary>
-
-> ```bash
-> # Install pytorch with your ROCm version (Linux only), e.g.
-> pip install torch==2.9.1+rocm7.2 torchaudio==2.9.1+rocm7.2 --extra-index-url https://download.pytorch.org/whl/rocm7.2
->
-> # For older GPUs (RDNA1/2/3 only):
-> # pip install torch==2.5.1+rocm6.2 torchaudio==2.5.1+rocm6.2 --extra-index-url https://download.pytorch.org/whl/rocm6.2
-> ```
->
-> **Note:** RDNA 3.5 and RDNA 4 GPUs (Radeon 8050S/8060S, RX 9060/9070 series) require
-> ROCm 7.x — these architectures (gfx1151/gfx1201) are not included in ROCm 6.x
-> ([6.2 compatibility matrix](https://rocm.docs.amd.com/en/docs-6.2.4/compatibility/compatibility-matrix.html) vs
-> [7.2 compatibility matrix](https://rocm.docs.amd.com/en/docs-7.2.3/compatibility/compatibility-matrix.html)).
-> Using ROCm 6.x on these GPUs causes `HIP error: invalid device function` ([#1236](https://github.com/SWivid/F5-TTS/issues/1236)).
-
-</details>
-
-<details>
-<summary>Intel GPU</summary>
-
-> ```bash
-> # Install pytorch with your XPU version, e.g.
-> # Intel® Deep Learning Essentials or Intel® oneAPI Base Toolkit must be installed
-> pip install torch torchaudio --index-url https://download.pytorch.org/whl/test/xpu
-> 
-> # Intel GPU support is also available through IPEX (Intel® Extension for PyTorch)
-> # IPEX does not require the Intel® Deep Learning Essentials or Intel® oneAPI Base Toolkit
-> # See: https://pytorch-extension.intel.com/installation?request=platform
-> ```
-
-</details>
-
-<details>
-<summary>Apple Silicon</summary>
-
-> ```bash
-> # Install the stable pytorch, e.g.
-> pip install torch torchaudio
-> ```
-
-</details>
-
-### Then you can choose one from below:
-
-> ### 1. As a pip package (if just for inference)
-> 
-> ```bash
-> pip install f5-tts
-> ```
-> 
-> ### 2. Local editable (if also do training, finetuning)
-> 
-> ```bash
-> git clone https://github.com/SWivid/F5-TTS.git
-> cd F5-TTS
-> # git submodule update --init --recursive  # (optional, if use bigvgan as vocoder)
-> pip install -e .
-> ```
-
-### Docker usage also available
 ```bash
-# Build from Dockerfile
-docker build -t f5tts:v1 .
-
-# Run from GitHub Container Registry
-docker container run --rm -it --gpus=all --mount 'type=volume,source=f5-tts,target=/root/.cache/huggingface/hub/' -p 7860:7860 ghcr.io/swivid/f5-tts:main
-
-# Quickstart if you want to just run the web interface (not CLI)
-docker container run --rm -it --gpus=all --mount 'type=volume,source=f5-tts,target=/root/.cache/huggingface/hub/' -p 7860:7860 ghcr.io/swivid/f5-tts:main f5-tts_infer-gradio --host 0.0.0.0
+python3.15 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
 ```
+
+Nos comandos abaixo, no Windows substitua `python` por
+`.\.venv\Scripts\python.exe` se não ativou o ambiente.
+
+### 3. Instalar PyTorch antes do projeto
+
+**CPU (rota usada nos testes locais):**
+
+```bash
+python -m pip install "torch>=2.15.0" torchaudio --index-url https://download.pytorch.org/whl/cpu
+```
+
+**NVIDIA, AMD, Intel ou Apple Silicon:** use o seletor oficial
+[PyTorch](https://pytorch.org/get-started/locally/) para escolher um build estável
+que ofereça wheels para Python 3.15 e suporte à sua GPU e ao seu driver.
+Não reutilize os comandos antigos para torch 2.8/CUDA 12.8: eles não são a rota
+para Python 3.15. Não misture arbitrariamente versões de torch e torchaudio;
+consulte a [matriz do TorchAudio](https://docs.pytorch.org/audio/stable/installation.html).
+A combinação validada em CPU neste fork é torch 2.15.0 + torchaudio 2.11.1.
+
+### 4. Instalar e verificar
+
+```bash
+python -m pip install -e .
+python -m pip check
+python -m unittest discover -s tests -v
+```
+
+A instalação editável usa **este fork**. `pip install f5-tts` instala a distribuição
+publicada no PyPI e não inclui automaticamente estas modificações.
+Para o vocoder BigVGAN opcional: `git submodule update --init --recursive`.
+A leitura/gravação de áudio do aplicativo usa SoundFile, sem exigir TorchCodec.
+A compatibilidade do pydub com Python 3.13+ é fornecida por `audioop-lts`.
+WAV é o formato recomendado; outros codecs dependem do libsndfile/FFmpeg disponível.
+
+### 5. Abrir a interface
+
+```bash
+f5-tts_infer-gradio --inbrowser
+```
+
+No Windows sem ativação:
+
+```powershell
+.\.venv\Scripts\f5-tts_infer-gradio.exe --inbrowser
+```
+
+O primeiro uso baixa os modelos e precisa de internet e espaço em disco.
+Os checkpoints originais são voltados a inglês e chinês; traduzir a interface
+não adiciona idiomas ao modelo.
+
+### Docker (CPU, Python 3.15.2)
+
+```bash
+docker build -f Dockerfile.python315 -t f5tts-python315 .
+docker run --rm -p 7860:7860 -v f5-tts-cache:/root/.cache/huggingface/hub f5tts-python315
+```
+
+O Dockerfile.python315 usa os arquivos deste checkout. A imagem publicada
+`ghcr.io/swivid/f5-tts:main` pertence ao projeto original e não contém
+necessariamente esta atualização. O Dockerfile original com CUDA foi preservado. O Dockerfile.python315 é voltado a CPU;
+para GPU, prepare uma imagem compatível com seu runtime NVIDIA/ROCm.
+O runtime especializado Triton/TensorRT-LLM em `src/f5_tts/runtime/` mantém seu
+ambiente próprio e não foi migrado nem validado com Python 3.15.
+Os extras de avaliação (`.[eval]`) também precisam de validação independente.
 
 ### Runtime
 
