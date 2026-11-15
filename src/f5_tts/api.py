@@ -2,6 +2,7 @@ import random
 import sys
 from importlib.resources import files
 
+import numpy as np
 import soundfile as sf
 import tqdm
 from cached_path import cached_path
@@ -78,6 +79,10 @@ class F5TTS:
         return transcribe(ref_audio, language)
 
     def export_wav(self, wav, file_wave, remove_silence=False):
+        # PCM WAV clips samples outside [-1, 1]; preserve their relative levels.
+        peak = np.max(np.abs(wav)) if len(wav) else 0
+        if peak > 1:
+            wav = wav * (0.99 / peak)
         sf.write(file_wave, wav, self.target_sample_rate)
 
         if remove_silence:
