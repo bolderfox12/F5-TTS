@@ -22,6 +22,69 @@
 - **2025/03/12**: 🔥 F5-TTS v1 base model with better training and inference performance. [Few demo](https://swivid.github.io/F5-TTS_updates).
 - **2024/10/08**: F5-TTS & E2 TTS base models on [🤗 Hugging Face](https://huggingface.co/SWivid/F5-TTS), [🤖 Model Scope](https://www.modelscope.cn/models/SWivid/F5-TTS_Emilia-ZH-EN), [🟣 Wisemodel](https://wisemodel.cn/models/SJTU_X-LANCE/F5-TTS_Emilia-ZH-EN).
 
+## Novo F5 Studio — interface NiceGUI
+
+A branch `studio/nicegui` reúne criação de áudio, vozes salvas, treinamento guiado,
+histórico e configurações em uma interface local em português, com menu lateral.
+Ela inclui as alterações de Python 3.15.2 e treinamento das branches anteriores.
+O Gradio continua disponível como alternativa avançada.
+
+Depois de criar o ambiente Python e instalar o PyTorch conforme a seção abaixo:
+
+```bash
+git fetch origin
+git switch studio/nicegui
+python -m pip install -e ".[studio]"
+f5-tts_studio
+```
+
+Abra `http://127.0.0.1:7862`. No Windows sem ativar o ambiente, use
+`.\.venv\Scripts\python.exe -m pip install -e ".[studio]"` e
+`.\.venv\Scripts\f5-tts_studio.exe`.
+Para outra porta: `f5-tts_studio --port 7870`. Para não abrir automaticamente o
+navegador: `f5-tts_studio --no-browser`.
+
+### O que cada área faz
+
+| Área | Como usar |
+| --- | --- |
+| Criar áudio | Escolha uma voz salva ou envie referência curta, escreva o roteiro, gere, ouça e baixe WAV. |
+| Minhas vozes | Salve referências e transcrições com nomes fáceis de encontrar. Salvar uma referência não treina o modelo. |
+| Treinar uma voz | Crie/abra projeto, envie vários áudios, gere textos, revise cada trecho, aprove, prepare, treine e teste checkpoints. |
+| Histórico | Reproduza e baixe os áudios gerados; os testes guardam projeto, checkpoint e avaliações. |
+| Configurações | Veja a GPU detectada e escolha Automático/CPU/CUDA, velocidade e 16/32/48 etapas de geração. |
+
+Os modelos só são carregados na primeira operação que precisa deles. O primeiro
+uso exige internet para baixar pesos. Vozes, referências e histórico ficam por
+padrão em `~/.f5tts-studio`; use `--workspace /caminho/para/pasta` para outra pasta.
+Os projetos de treinamento continuam em `data` e os checkpoints em `ckpts` do
+checkout editável, compatíveis com o treinamento anterior.
+O aplicativo é local, para uma pessoa por vez, e escuta apenas em `127.0.0.1`.
+Não inclui autenticação nem implantação pública. Operações pesadas são
+serializadas para evitar treinamento e geração disputando a GPU dentro do estúdio.
+Não execute simultaneamente treinamento em outro aplicativo/terminal na mesma GPU.
+
+### NVIDIA: qualidade e velocidade
+
+CUDA permite usar a GPU para geração e ajuste fino. Uma RTX 3090 pode aproveitar
+a rota CUDA, desde que o driver e o build PyTorch sejam compatíveis.
+TensorRT é voltado à otimização de execução; **não torna a voz melhor automaticamente**.
+Precisão reduzida pode mudar os resultados e precisa de comparação:
+[NVIDIA — accuracy considerations](https://docs.nvidia.com/deeplearning/tensorrt/latest/inference-library/accuracy-considerations.html).
+Este estúdio usa o backend PyTorch existente; não instala nem ativa TensorRT.
+O runtime Triton/TensorRT-LLM original continua separado e exige validação própria.
+
+Para buscar naturalidade, priorize gravações limpas, transcrições corretas e
+ajuste fino revisado. O perfil com mais etapas é uma opção de comparação, sem
+promessa de qualidade superior. Os modelos originais são voltados a inglês e
+chinês; suporte de qualidade em português depende dos checkpoints e dos dados.
+
+Validação do estúdio: testes de persistência, geração com modelo simulado,
+configurações, exclusão mútua e resposta HTTP das cinco páginas em Python 3.15.2.
+Sem validação visual no navegador, geração real com checkpoints ou treinamento
+completo em GPU neste ambiente. O treinamento e importação reaproveitam o fluxo
+anterior, com testes offline de preparação e revisão.
+
 ## Installation / Instalação (Python 3.15.2)
 
 Este fork foi atualizado para **CPython 3.15.2**, a versão estável mais recente
