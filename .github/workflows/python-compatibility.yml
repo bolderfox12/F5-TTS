@@ -1,0 +1,31 @@
+name: Python compatibility
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cpu-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.15.2'
+      - name: Install system audio libraries
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg libsndfile1
+      - name: Install stable CPU dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install "torch>=2.15.0" torchaudio --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e .
+          python -m pip check
+      - name: Compile and exercise audio and model
+        run: |
+          python -m compileall -q src
+          python -m unittest discover -s tests -v
