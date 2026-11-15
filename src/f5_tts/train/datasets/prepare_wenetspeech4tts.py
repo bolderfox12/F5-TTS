@@ -1,8 +1,9 @@
 # generate audio text map for WenetSpeech4TTS
 # evaluate for vocab size
-
 import os
 import sys
+
+from f5_tts.audio import load_audio
 
 
 sys.path.append(os.getcwd())
@@ -11,7 +12,6 @@ import json
 from concurrent.futures import ProcessPoolExecutor
 from importlib.resources import files
 
-import torchaudio
 from datasets import Dataset
 from tqdm import tqdm
 
@@ -40,7 +40,7 @@ def deal_with_sub_path_files(dataset_path, sub_path):
         elif tokenizer == "char":
             texts.append(text)
 
-        audio, sample_rate = torchaudio.load(audio_path)
+        audio, sample_rate = load_audio(audio_path)
         durations.append(audio.shape[-1] / sample_rate)
 
     return audio_paths, texts, durations
