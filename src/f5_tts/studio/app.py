@@ -52,7 +52,7 @@ def register_pages(service):
                 ("Criar áudio", "graphic_eq", "/"),
                 ("Minhas vozes", "record_voice_over", "/voices"),
                 ("Meus modelos", "inventory_2", "/models"),
-                ("Arquivos", "folder_managed", "/files"),
+                ("Biblioteca de áudios", "folder_managed", "/files"),
                 ("Projetos de narração", "article", "/projects"),
                 ("Histórias e personagens", "auto_stories", "/stories"),
                 ("Transcrição e legendas", "subtitles", "/transcription"),

@@ -7,8 +7,8 @@
 A local web studio for creating speech, saved voices, narrated stories, subtitles, and voice models.
 F5 Studio uses [F5-TTS](https://github.com/SWivid/F5-TTS) for speech synthesis and runs processing on your computer.
 
-**Version 1.3.1:** an expanded training workspace, checkpoint comparison and publishing, model storage
-management, and a local file library. See the [release notes](docs/releases/v1.3.1.md)
+**Version 1.3.2:** an expanded training workspace, checkpoint comparison and publishing, model storage
+management, and an audio library with waveform previews and non-destructive trimming. See the [release notes](docs/releases/v1.3.2.md)
 and [changelog](CHANGELOG.md).
 
 ## What you can do
@@ -18,7 +18,7 @@ and [changelog](CHANGELOG.md).
 | Create audio | Record or upload a reference, select a voice and model, generate speech, and download WAV. |
 | My voices | Keep named reference recordings and transcripts for reuse. |
 | My models | Inspect model files and disk usage, register checkpoints, and remove managed weights when they are no longer needed. |
-| Files | Organize generated audio, voice references, and captions; copy, move, download, or delete local files. |
+| Audio library | Find and filter generated audio and voice references; preview waveforms, trim audio into a new WAV, save clips as voices, copy, move, download, or delete files. |
 | Stories and characters | Build a cast, assign each character a voice and model, write dialogue, and export the complete story. |
 | Narration projects | Work with paragraph-based narration, voice assignments, segment edits, pauses, and WAV/SRT export. |
 | Transcription and subtitles | Transcribe locally, correct segments, translate subtitles, and export TXT/SRT. |

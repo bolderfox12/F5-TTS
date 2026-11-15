@@ -600,6 +600,8 @@ class StudioService(StoryTools, LocalTools):
 
         for voice in data.get("voices", []):
             add_use(voice.get("reference"), "Voz: " + voice.get("name", ""))
+        for edit in data.get("audio_edits", []):
+            add_use(edit.get("path"), "Recorte de áudio")
         for entry in data.get("history", []):
             add_use(entry.get("path"), "Histórico: " + (entry.get("text", "")[:90]))
         for project in data.get("narrations", []):
@@ -625,6 +627,8 @@ class StudioService(StoryTools, LocalTools):
                 category = "Referência salva"
             elif any(role.startswith("Histórico:") for role in roles):
                 category = "Áudio gerado"
+            elif any(role.startswith("Recorte de áudio") for role in roles):
+                category = "Áudio editado"
             elif path.suffix.lower() in (".srt", ".txt"):
                 category = "Legenda ou texto"
             else:
@@ -641,6 +645,61 @@ class StudioService(StoryTools, LocalTools):
                 }
             )
         return sorted(result, key=lambda item: item["modified"], reverse=True)
+
+    def audio_waveform(self, source, points=180):
+        """Return a compact peak envelope and duration for an audio-library preview."""
+        path = self._managed_asset(source)
+        info = sf.info(path)
+        bucket_size = max(1, (info.frames + points - 1) // points)
+        peaks = []
+        with sf.SoundFile(path) as audio:
+            while True:
+                block = audio.read(bucket_size, dtype="float32", always_2d=True)
+                if not len(block):
+                    break
+                peaks.append(float(abs(block).max()))
+        peak = max(peaks, default=0.0)
+        normalized = [round(value / peak, 4) if peak else 0.0 for value in peaks]
+        return {
+            "duration": info.duration,
+            "sample_rate": info.samplerate,
+            "channels": info.channels,
+            "peaks": normalized,
+        }
+
+    def trim_audio(self, source, start_seconds, end_seconds):
+        """Save a selected time range as a new WAV in the Studio output library."""
+        source_path = self._managed_asset(source)
+        info = sf.info(source_path)
+        start = float(start_seconds)
+        end = float(end_seconds)
+        if start < 0 or end > info.duration or end - start < 0.05:
+            raise ValueError("Escolha um trecho válido de pelo menos 0,05 segundo.")
+        first = max(0, int(start * info.samplerate))
+        last = min(info.frames, int(end * info.samplerate))
+        if last <= first:
+            raise ValueError("O trecho selecionado está vazio.")
+        output = self.outputs / f"recorte-{uuid4().hex[:12]}.wav"
+        with sf.SoundFile(source_path) as audio:
+            audio.seek(first)
+            segment = audio.read(last - first, dtype="float32", always_2d=True)
+        sf.write(output, segment, info.samplerate, subtype=info.subtype)
+        result = {"path": str(output), "duration": len(segment) / info.samplerate, "size": output.stat().st_size}
+        with self._storage:
+            data = self.read()
+            data.setdefault("audio_edits", []).insert(
+                0,
+                {
+                    "id": uuid4().hex,
+                    **result,
+                    "source": str(source_path),
+                    "start": start,
+                    "end": end,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            self.write(data)
+        return result
 
     def _managed_asset(self, value):
         path = Path(value).expanduser().resolve()
@@ -745,6 +804,7 @@ class StudioService(StoryTools, LocalTools):
                         )
                 data["voices"] = [voice for voice in data.get("voices", []) if voice["id"] not in removed_voice_ids]
                 data["history"] = [entry for entry in data.get("history", []) if not matches(entry.get("path"))]
+                data["audio_edits"] = [edit for edit in data.get("audio_edits", []) if not matches(edit.get("path"))]
                 for project in data.get("narrations", []):
                     for block in project.get("blocks", []):
                         if matches((block.get("render") or {}).get("path")):

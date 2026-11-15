@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.2 — 2026-11-15
+
+### Added
+
+- Audio library search and category filters, waveform previews, non-destructive WAV trimming, and a shortcut to save clips as voice references.
+- Localized library controls in all seven interface languages.
+
 ## 1.3.1 — 2026-11-15
 
 ### Added

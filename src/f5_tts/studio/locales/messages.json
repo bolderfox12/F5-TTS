@@ -4075,5 +4075,392 @@
     " · CUDA nicht verfügbar",
     " · CUDA 不可用",
     " · CUDA 使用不可"
+  ],
+  [
+    "Biblioteca de áudios",
+    "Audio library",
+    "Biblioteca de audio",
+    "Bibliothèque audio",
+    "Audiothek",
+    "音频库",
+    "オーディオライブラリ"
+  ],
+  [
+    "Encontre, ouça, corte, baixe e organize os áudios gerados e suas referências. O corte cria um novo WAV e preserva o arquivo original.",
+    "Find, play, trim, download, and organize generated audio and voice references. Trimming creates a new WAV and keeps the original.",
+    "Busca, escucha, recorta, descarga y organiza el audio generado y las referencias. El recorte crea un WAV y conserva el original.",
+    "Retrouvez, écoutez, découpez, téléchargez et organisez les audios générés et les références. Le découpage crée un WAV et conserve l’original.",
+    "Finden, anhören, schneiden, herunterladen und organisieren Sie generierte Audiodateien und Referenzen. Der Zuschnitt erstellt eine WAV-Datei und erhält das Original.",
+    "查找、试听、剪辑、下载和整理生成的音频与参考音频。剪辑会创建新的 WAV 文件并保留原文件。",
+    "生成音声や参照音声を検索、再生、トリミング、ダウンロード、整理できます。トリミングでは元のファイルを残して新しい WAV を作成します。"
+  ],
+  [
+    "Copiar mantém o arquivo original; mover atualiza os vínculos do Studio. O destino pode ser um caminho Windows ou Linux.",
+    "Copy keeps the original; move updates Studio links. The destination can be a Windows or Linux path.",
+    "Copiar conserva el original; mover actualiza los vínculos de Studio. El destino puede ser una ruta de Windows o Linux.",
+    "La copie conserve l’original ; le déplacement met à jour les liens Studio. La destination peut être un chemin Windows ou Linux.",
+    "Beim Kopieren bleibt das Original erhalten; beim Verschieben werden Studio-Verknüpfungen aktualisiert. Als Ziel ist ein Windows- oder Linux-Pfad möglich.",
+    "复制会保留原文件；移动会更新 Studio 中的引用。目标路径可以是 Windows 或 Linux 路径。",
+    "コピーでは元のファイルを保持し、移動では Studio 内の参照を更新します。Windows または Linux のパスを指定できます。"
+  ],
+  [
+    "Buscar arquivos",
+    "Search files",
+    "Buscar archivos",
+    "Rechercher des fichiers",
+    "Dateien suchen",
+    "搜索文件",
+    "ファイルを検索"
+  ],
+  [
+    "Nome, referência ou texto gerado",
+    "Name, reference, or generated text",
+    "Nombre, referencia o texto generado",
+    "Nom, référence ou texte généré",
+    "Name, Referenz oder generierter Text",
+    "名称、参考音频或生成文本",
+    "名前、参照音声、生成テキスト"
+  ],
+  [
+    "Categoria",
+    "Category",
+    "Categoría",
+    "Catégorie",
+    "Kategorie",
+    "类别",
+    "カテゴリ"
+  ],
+  [
+    "Todos",
+    "All",
+    "Todos",
+    "Tout",
+    "Alle",
+    "全部",
+    "すべて"
+  ],
+  [
+    "Forma de onda · {value_0} · {value_1} Hz",
+    "Waveform · {value_0} · {value_1} Hz",
+    "Forma de onda · {value_0} · {value_1} Hz",
+    "Forme d’onde · {value_0} · {value_1} Hz",
+    "Wellenform · {value_0} · {value_1} Hz",
+    "波形 · {value_0} · {value_1} Hz",
+    "波形 · {value_0} · {value_1} Hz"
+  ],
+  [
+    "Cortar este áudio",
+    "Trim this audio",
+    "Recortar este audio",
+    "Découper cet audio",
+    "Audio zuschneiden",
+    "剪辑此音频",
+    "この音声をトリミング"
+  ],
+  [
+    "Escolha o início e o fim abaixo. O original fica guardado na biblioteca.",
+    "Choose the start and end below. The original stays in the library.",
+    "Elige el inicio y el final abajo. El original permanece en la biblioteca.",
+    "Choisissez le début et la fin ci-dessous. L’original reste dans la bibliothèque.",
+    "Wählen Sie unten Anfang und Ende aus. Das Original bleibt in der Bibliothek.",
+    "在下方选择开始和结束位置。原文件会保留在库中。",
+    "下で開始位置と終了位置を選びます。元のファイルはライブラリに残ります。"
+  ],
+  [
+    "Início do trecho (segundos)",
+    "Clip start (seconds)",
+    "Inicio del fragmento (segundos)",
+    "Début de l’extrait (secondes)",
+    "Anfang des Ausschnitts (Sekunden)",
+    "片段开始（秒）",
+    "クリップの開始（秒）"
+  ],
+  [
+    "Fim do trecho (segundos)",
+    "Clip end (seconds)",
+    "Fin del fragmento (segundos)",
+    "Fin de l’extrait (secondes)",
+    "Ende des Ausschnitts (Sekunden)",
+    "片段结束（秒）",
+    "クリップの終了（秒）"
+  ],
+  [
+    "Criar recorte WAV",
+    "Create trimmed WAV",
+    "Crear recorte WAV",
+    "Créer un extrait WAV",
+    "WAV-Ausschnitt erstellen",
+    "创建剪辑后的 WAV",
+    "トリミングした WAV を作成"
+  ],
+  [
+    "Recorte salvo: {value_0} ({value_1})",
+    "Trim saved: {value_0} ({value_1})",
+    "Recorte guardado: {value_0} ({value_1})",
+    "Extrait enregistré : {value_0} ({value_1})",
+    "Zuschnitt gespeichert: {value_0} ({value_1})",
+    "剪辑已保存：{value_0}（{value_1}）",
+    "トリミングを保存しました: {value_0}（{value_1}）"
+  ],
+  [
+    "Recorte adicionado à biblioteca sem alterar o original.",
+    "Trim added to the library; the original is unchanged.",
+    "Recorte añadido a la biblioteca; el original no cambió.",
+    "Extrait ajouté à la bibliothèque ; l’original est inchangé.",
+    "Zuschnitt zur Bibliothek hinzugefügt; das Original bleibt unverändert.",
+    "剪辑已添加到音频库，原文件未更改。",
+    "トリミングした音声をライブラリに追加しました。元のファイルは変更されていません。"
+  ],
+  [
+    "Salvar áudio como voz de referência",
+    "Save audio as a voice reference",
+    "Guardar audio como referencia de voz",
+    "Enregistrer l’audio comme référence vocale",
+    "Audio als Stimmreferenz speichern",
+    "将音频保存为声音参考",
+    "音声を声の参照として保存"
+  ],
+  [
+    "Texto falado no áudio",
+    "Words spoken in the audio",
+    "Texto hablado en el audio",
+    "Texte prononcé dans l’audio",
+    "Gesprochener Text",
+    "音频中的说话内容",
+    "音声で話されているテキスト"
+  ],
+  [
+    "Salvar como referência",
+    "Save as reference",
+    "Guardar como referencia",
+    "Enregistrer comme référence",
+    "Als Referenz speichern",
+    "保存为参考音频",
+    "参照音声として保存"
+  ],
+  [
+    "Referência adicionada a Minhas vozes.",
+    "Reference added to My Voices.",
+    "Referencia añadida a Mis voces.",
+    "Référence ajoutée à Mes voix.",
+    "Referenz zu Meine Stimmen hinzugefügt.",
+    "参考音频已添加到“我的声音”。",
+    "参照音声を「マイボイス」に追加しました。"
+  ],
+  [
+    "Referência enviada, ainda não salva em Minhas vozes.",
+    "Uploaded reference, not yet saved in My Voices.",
+    "Referencia subida, aún no guardada en Mis voces.",
+    "Référence importée, pas encore enregistrée dans Mes voix.",
+    "Hochgeladene Referenz, noch nicht unter Meine Stimmen gespeichert.",
+    "已上传的参考音频，尚未保存到“我的声音”。",
+    "アップロード済みの参照音声です。「マイボイス」にはまだ保存されていません。"
+  ],
+  [
+    "Nenhum arquivo corresponde à busca. Confira o Histórico para áudios gerados.",
+    "No files match your search. Check History for generated audio.",
+    "Ningún archivo coincide con la búsqueda. Consulta el Historial para ver el audio generado.",
+    "Aucun fichier ne correspond à la recherche. Consultez l’historique pour les audios générés.",
+    "Keine Dateien entsprechen der Suche. Generierte Audiodateien finden Sie im Verlauf.",
+    "没有匹配的文件。请在历史记录中查看生成的音频。",
+    "検索に一致するファイルがありません。生成音声は履歴を確認してください。"
+  ],
+  [
+    "Áudio gerado",
+    "Generated audio",
+    "Audio generado",
+    "Audio généré",
+    "Generierte Audiodatei",
+    "生成的音频",
+    "生成音声"
+  ],
+  [
+    "Referência salva",
+    "Saved reference",
+    "Referencia guardada",
+    "Référence enregistrée",
+    "Gespeicherte Referenz",
+    "已保存的参考音频",
+    "保存済みの参照音声"
+  ],
+  [
+    "Áudio editado",
+    "Edited audio",
+    "Audio editado",
+    "Audio modifié",
+    "Bearbeitete Audiodatei",
+    "已编辑音频",
+    "編集済み音声"
+  ],
+  [
+    "Upload de áudio",
+    "Audio upload",
+    "Audio subido",
+    "Audio importé",
+    "Audio-Upload",
+    "上传的音频",
+    "アップロード音声"
+  ],
+  [
+    "Legenda ou texto",
+    "Caption or text",
+    "Subtítulo o texto",
+    "Sous-titre ou texte",
+    "Untertitel oder Text",
+    "字幕或文本",
+    "字幕またはテキスト"
+  ],
+  [
+    "Pasta de destino",
+    "Destination folder",
+    "Carpeta de destino",
+    "Dossier de destination",
+    "Zielordner",
+    "目标文件夹",
+    "保存先フォルダー"
+  ],
+  [
+    "Copiar para pasta",
+    "Copy to folder",
+    "Copiar a la carpeta",
+    "Copier vers le dossier",
+    "In Ordner kopieren",
+    "复制到文件夹",
+    "フォルダーにコピー"
+  ],
+  [
+    "Mover para pasta",
+    "Move to folder",
+    "Mover a la carpeta",
+    "Déplacer vers le dossier",
+    "In Ordner verschieben",
+    "移动到文件夹",
+    "フォルダーに移動"
+  ],
+  [
+    "Novo nome (opcional)",
+    "New name (optional)",
+    "Nuevo nombre (opcional)",
+    "Nouveau nom (facultatif)",
+    "Neuer Name (optional)",
+    "新名称（可选）",
+    "新しい名前（任意）"
+  ],
+  [
+    "Sem vínculo ativo no histórico ou na biblioteca de vozes.",
+    "No active link in History or My Voices.",
+    "Sin vínculo activo en el Historial ni en Mis voces.",
+    "Aucun lien actif dans l’historique ou Mes voix.",
+    "Keine aktive Verknüpfung im Verlauf oder unter Meine Stimmen.",
+    "未关联到历史记录或“我的声音”。",
+    "履歴または「マイボイス」に関連付けられていません。"
+  ],
+  [
+    "Voz: {value_0}",
+    "Voice: {value_0}",
+    "Voz: {value_0}",
+    "Voix : {value_0}",
+    "Stimme: {value_0}",
+    "声音：{value_0}",
+    "ボイス: {value_0}"
+  ],
+  [
+    "Histórico: {value_0}",
+    "History: {value_0}",
+    "Historial: {value_0}",
+    "Historique : {value_0}",
+    "Verlauf: {value_0}",
+    "历史记录：{value_0}",
+    "履歴: {value_0}"
+  ],
+  [
+    "Trecho: {value_0}",
+    "Clip: {value_0}",
+    "Fragmento: {value_0}",
+    "Extrait : {value_0}",
+    "Ausschnitt: {value_0}",
+    "片段：{value_0}",
+    "クリップ: {value_0}"
+  ],
+  [
+    "Narração: {value_0}",
+    "Narration: {value_0}",
+    "Narración: {value_0}",
+    "Narration : {value_0}",
+    "Erzählung: {value_0}",
+    "旁白：{value_0}",
+    "ナレーション: {value_0}"
+  ],
+  [
+    "Legendas: {value_0}",
+    "Subtitles: {value_0}",
+    "Subtítulos: {value_0}",
+    "Sous-titres : {value_0}",
+    "Untertitel: {value_0}",
+    "字幕：{value_0}",
+    "字幕: {value_0}"
+  ],
+  [
+    "Transcrição",
+    "Transcript",
+    "Transcripción",
+    "Transcription",
+    "Transkript",
+    "转录",
+    "文字起こし"
+  ],
+  [
+    "Arquivo movido: ",
+    "File moved: ",
+    "Archivo movido: ",
+    "Fichier déplacé : ",
+    "Datei verschoben: ",
+    "文件已移动：",
+    "ファイルを移動しました: "
+  ],
+  [
+    "Cópia salva: ",
+    "Copy saved: ",
+    "Copia guardada: ",
+    "Copie enregistrée : ",
+    "Kopie gespeichert: ",
+    "副本已保存：",
+    "コピーを保存しました: "
+  ],
+  [
+    "Apagar arquivo?",
+    "Delete file?",
+    "¿Eliminar archivo?",
+    "Supprimer le fichier ?",
+    "Datei löschen?",
+    "删除文件？",
+    "ファイルを削除しますか？"
+  ],
+  [
+    "Apagar arquivo",
+    "Delete file",
+    "Eliminar archivo",
+    "Supprimer le fichier",
+    "Datei löschen",
+    "删除文件",
+    "ファイルを削除"
+  ],
+  [
+    "Áudio apagado. Espaço liberado: ",
+    "Audio deleted. Space freed: ",
+    "Audio eliminado. Espacio liberado: ",
+    "Audio supprimé. Espace libéré : ",
+    "Audio gelöscht. Speicherplatz frei: ",
+    "音频已删除。释放空间：",
+    "音声を削除しました。解放された容量: "
+  ],
+  [
+    "Ainda não há arquivos de áudio ou saída para organizar.",
+    "There are no audio or output files to organize yet.",
+    "Aún no hay archivos de audio o resultados para organizar.",
+    "Aucun fichier audio ou résultat à organiser pour le moment.",
+    "Es gibt noch keine Audiodateien oder Ausgaben zum Organisieren.",
+    "目前没有可整理的音频或输出文件。",
+    "整理できる音声ファイルや出力ファイルはまだありません。"
   ]
 ]
