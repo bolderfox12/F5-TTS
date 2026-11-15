@@ -25,11 +25,13 @@
 
 ## Alterações deste fork
 
+- **Treinamento guiado com áudios prontos:** envie vários arquivos, escolha o idioma, gere transcrições, revise e aprove antes de treinar. Depois teste checkpoints e registre avaliações. Disponível na branch [`training/guided`](https://github.com/bolderfox12/F5-TTS/tree/training/guided), no [PR #3](https://github.com/bolderfox12/F5-TTS/pull/3). Veja as [instruções de abertura](https://github.com/bolderfox12/F5-TTS/tree/training/guided#treinamento-guiado--novo-assistente).
+
 - **Python 3.15.2:** instalação e dependências atualizadas; leitura e gravação de áudio sem TorchCodec obrigatório. Disponível na branch [`python/latest-stable`](https://github.com/bolderfox12/F5-TTS/tree/python/latest-stable), no [PR #2](https://github.com/bolderfox12/F5-TTS/pull/2).
 - **Nova interface:** estúdio de voz com controles principais em português, visual verde-petróleo e fluxo em três etapas. Disponível na branch [`interface/estudio-voz-pt-br`](https://github.com/bolderfox12/F5-TTS/tree/interface/estudio-voz-pt-br), no [PR #1](https://github.com/bolderfox12/F5-TTS/pull/1).
 - **Verificações:** testes de compatibilidade com Python 3.15.2 em CPU e verificações de código aprovados no GitHub. Geração com checkpoints reais, treinamento completo e GPU ainda precisam de validação.
 
-As duas melhorias estão em revisão e ainda não foram integradas à `main`.
+As melhorias estão em revisão e ainda não foram integradas à `main`.
 Siga a seção de instalação para usar a branch de Python 3.15.2.
 
 ## Instalação — Python 3.15.2
