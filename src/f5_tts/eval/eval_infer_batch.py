@@ -1,6 +1,8 @@
 import os
 import sys
 
+from f5_tts.audio import save_audio
+
 
 sys.path.append(os.getcwd())
 
@@ -9,7 +11,6 @@ import time
 from importlib.resources import files
 
 import torch
-import torchaudio
 from accelerate import Accelerator
 from hydra.utils import get_class
 from omegaconf import OmegaConf
@@ -209,7 +210,7 @@ def main():
 
                     if ref_rms_list[i] < target_rms:
                         generated_wave = generated_wave * ref_rms_list[i] / target_rms
-                    torchaudio.save(f"{output_dir}/{utts[i]}.wav", generated_wave, target_sample_rate)
+                    save_audio(f"{output_dir}/{utts[i]}.wav", generated_wave, target_sample_rate)
 
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
