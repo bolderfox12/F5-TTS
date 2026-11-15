@@ -21,7 +21,6 @@ import librosa
 import numpy as np
 import psutil
 import torch
-import torchaudio
 from cached_path import cached_path
 from datasets import Dataset as Dataset_
 from datasets.arrow_writer import ArrowWriter
@@ -29,6 +28,7 @@ from safetensors.torch import load_file, save_file
 from scipy.io import wavfile
 
 from f5_tts.api import F5TTS
+from f5_tts.audio import load_audio
 from f5_tts.device_utils import get_default_device
 from f5_tts.infer.utils_infer import transcribe
 from f5_tts.model.utils import convert_char_to_pinyin
@@ -183,7 +183,7 @@ def load_settings(project_name):
 # Load metadata
 def get_audio_duration(audio_path):
     """Calculate the duration mono of an audio file."""
-    audio, sample_rate = torchaudio.load(audio_path)
+    audio, sample_rate = load_audio(audio_path)
     return audio.shape[1] / sample_rate
 
 
