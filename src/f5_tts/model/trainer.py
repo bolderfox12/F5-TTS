@@ -5,7 +5,6 @@ import math
 import os
 
 import torch
-import torchaudio
 import wandb
 from accelerate import Accelerator
 from accelerate.utils import DistributedDataParallelKwargs
@@ -15,6 +14,7 @@ from torch.optim.lr_scheduler import LinearLR, SequentialLR
 from torch.utils.data import DataLoader, Dataset, SequentialSampler
 from tqdm import tqdm
 
+from f5_tts.audio import save_audio
 from f5_tts.model import CFM
 from f5_tts.model.dataset import DynamicBatchSampler, collate_fn
 from f5_tts.model.utils import default, exists
@@ -429,12 +429,8 @@ class Trainer:
                                 gen_audio = vocoder(gen_mel_spec).squeeze(0).cpu()
                                 ref_audio = vocoder(ref_mel_spec).squeeze(0).cpu()
 
-                        torchaudio.save(
-                            f"{log_samples_path}/update_{global_update}_gen.wav", gen_audio, target_sample_rate
-                        )
-                        torchaudio.save(
-                            f"{log_samples_path}/update_{global_update}_ref.wav", ref_audio, target_sample_rate
-                        )
+                        save_audio(f"{log_samples_path}/update_{global_update}_gen.wav", gen_audio, target_sample_rate)
+                        save_audio(f"{log_samples_path}/update_{global_update}_ref.wav", ref_audio, target_sample_rate)
                         self.model.train()
 
         self.save_checkpoint(global_update, last=True)
