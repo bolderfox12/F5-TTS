@@ -58,7 +58,9 @@ def register_training_pages(service, shell, action, audio_upload):
                     with ui.card().classes("studio-card w-full gap-4"):
                         ui.label(t("1. Adicione gravações reais da mesma pessoa")).classes("font-semibold text-lg")
                         ui.label(
-                            t("Gravações limpas e variadas ensinam melhor a voz. Os áudios gerados pelo próprio modelo não entram automaticamente no conjunto de treino.")
+                            t(
+                                "Gravações limpas e variadas ensinam melhor a voz. Os áudios gerados pelo próprio modelo não entram automaticamente no conjunto de treino."
+                            )
                         ).classes("studio-muted")
                         import_status = ui.label(t("Nenhum arquivo enviado.")).classes("text-sm")
                         audio_upload(uploads, import_status, multiple=True)
@@ -120,7 +122,12 @@ def register_training_pages(service, shell, action, audio_upload):
                             examples = project.read()["examples"]
                             accepted = [example for example in examples if example["approved"]]
                             ui.label(
-                                t("{value_0} trechos · {value_1} aprovados · {value_2} segundos aprovados", value_0=len(examples), value_1=len(accepted), value_2=round(sum(example["duration"] for example in accepted), 1))
+                                t(
+                                    "{value_0} trechos · {value_1} aprovados · {value_2} segundos aprovados",
+                                    value_0=len(examples),
+                                    value_1=len(accepted),
+                                    value_2=round(sum(example["duration"] for example in accepted), 1),
+                                )
                             ).classes("studio-muted")
                             ui.table(
                                 columns=[
@@ -128,7 +135,10 @@ def register_training_pages(service, shell, action, audio_upload):
                                     {"name": "approved", "label": t("Aprovado"), "field": "approved"},
                                     {"name": "seconds", "label": t("Duração (s)"), "field": "seconds"},
                                 ],
-                                rows=[{"id": row[0], "approved": row[1], "text": row[2], "seconds": row[3]} for row in project.rows()],
+                                rows=[
+                                    {"id": row[0], "approved": row[1], "text": row[2], "seconds": row[3]}
+                                    for row in project.rows()
+                                ],
                                 row_key="id",
                                 selection="single",
                                 on_select=choose_example,
@@ -156,8 +166,12 @@ def register_training_pages(service, shell, action, audio_upload):
 
                         with ui.row():
                             ui.button(t("Salvar revisão"), icon="check", on_click=save_review).props("no-caps")
-                            ui.button(t("Preparar conjunto aprovado"), icon="dataset", on_click=prepare_dataset).props("no-caps unelevated")
-                        dataset_status = ui.label(t("A preparação verifica transcrições, arquivos e vocabulário.")).classes("studio-muted")
+                            ui.button(t("Preparar conjunto aprovado"), icon="dataset", on_click=prepare_dataset).props(
+                                "no-caps unelevated"
+                            )
+                        dataset_status = ui.label(
+                            t("A preparação verifica transcrições, arquivos e vocabulário.")
+                        ).classes("studio-muted")
 
                 with ui.tab_panel(train_tab):
                     with ui.card().classes("studio-card w-full gap-4"):
@@ -169,13 +183,19 @@ def register_training_pages(service, shell, action, audio_upload):
                                 return
                             info = await run.io_bound(service.training_hardware)
                             if not info["cuda"]:
-                                gpu_status.set_text(t("CUDA indisponível. Os dados podem ser preparados, mas o treino precisa de uma GPU NVIDIA."))
+                                gpu_status.set_text(
+                                    t(
+                                        "CUDA indisponível. Os dados podem ser preparados, mas o treino precisa de uma GPU NVIDIA."
+                                    )
+                                )
                                 return
                             details = [
-                                f'{info["name"]} · {info["memory"]} GB VRAM · {t("livre")}: {info["free"]} GB · {t("alocada")}: {info["allocated"]} GB'
+                                f"{info['name']} · {info['memory']} GB VRAM · {t('livre')}: {info['free']} GB · {t('alocada')}: {info['allocated']} GB"
                             ]
                             if info.get("utilization") is not None:
-                                details.append(f'{t("Uso")} {info["utilization"]}% · {t("temperatura")} {info["temperature"]} °C · {info["power"]} W')
+                                details.append(
+                                    f"{t('Uso')} {info['utilization']}% · {t('temperatura')} {info['temperature']} °C · {info['power']} W"
+                                )
                             gpu_status.set_text(" | ".join(details))
 
                         async def poll_gpu():
@@ -185,9 +205,17 @@ def register_training_pages(service, shell, action, audio_upload):
 
                     with ui.card().classes("studio-card w-full gap-4"):
                         ui.label(t("Modelo inicial e vocabulário")).classes("font-semibold text-lg")
-                        ui.label(t("Envie um checkpoint F5 compatível para continuar o treino. Se deixar vazio, o treino parte do modelo base e pode baixar cerca de 1,4 GB na primeira execução.")).classes("studio-muted")
-                        base_checkpoint = ui.input(t("Checkpoint inicial (.pt / .safetensors)"), value="").props("outlined")
-                        base_vocabulary = ui.input(t("Vocabulário do modelo (.txt, opcional)"), value="").props("outlined")
+                        ui.label(
+                            t(
+                                "Envie um checkpoint F5 compatível para continuar o treino. Se deixar vazio, o treino parte do modelo base e pode baixar cerca de 1,4 GB na primeira execução."
+                            )
+                        ).classes("studio-muted")
+                        base_checkpoint = ui.input(t("Checkpoint inicial (.pt / .safetensors)"), value="").props(
+                            "outlined"
+                        )
+                        base_vocabulary = ui.input(t("Vocabulário do modelo (.txt, opcional)"), value="").props(
+                            "outlined"
+                        )
 
                         async def upload_weight(event, target):
                             try:
@@ -199,30 +227,74 @@ def register_training_pages(service, shell, action, audio_upload):
                                 ui.notify(t(str(error)), type="negative")
 
                         with ui.row().classes("w-full flex-wrap"):
-                            ui.upload(label=t("Enviar checkpoint"), auto_upload=True, max_files=1, max_file_size=5_000_000_000, on_upload=lambda event: upload_weight(event, base_checkpoint)).props('accept=".pt,.pth,.ckpt,.safetensors"').classes("flex-1")
-                            ui.upload(label=t("Enviar vocabulário"), auto_upload=True, max_files=1, max_file_size=5_000_000, on_upload=lambda event: upload_weight(event, base_vocabulary)).props('accept=".txt"').classes("flex-1")
+                            ui.upload(
+                                label=t("Enviar checkpoint"),
+                                auto_upload=True,
+                                max_files=1,
+                                max_file_size=5_000_000_000,
+                                on_upload=lambda event: upload_weight(event, base_checkpoint),
+                            ).props('accept=".pt,.pth,.ckpt,.safetensors"').classes("flex-1")
+                            ui.upload(
+                                label=t("Enviar vocabulário"),
+                                auto_upload=True,
+                                max_files=1,
+                                max_file_size=5_000_000,
+                                on_upload=lambda event: upload_weight(event, base_vocabulary),
+                            ).props('accept=".txt"').classes("flex-1")
                         architecture = ui.select(
-                            {"F5TTS_v1_Base": "F5-TTS v1 Base", "F5TTS_Base": "F5-TTS Base", "E2TTS_Base": "E2-TTS Base"},
+                            {
+                                "F5TTS_v1_Base": "F5-TTS v1 Base",
+                                "F5TTS_Base": "F5-TTS Base",
+                                "E2TTS_Base": "E2-TTS Base",
+                            },
                             value="F5TTS_v1_Base",
                             label=t("Arquitetura do checkpoint"),
                         ).props("outlined")
 
                     with ui.card().classes("studio-card w-full gap-4"):
                         ui.label(t("Configuração para esta GPU")).classes("font-semibold text-lg")
-                        ui.label(t("O perfil sugerido usa precisão mista e tamanho de lote calculado pela VRAM. Reduza o lote se ocorrer falta de memória; use acumulação de gradiente para recuperar o tamanho efetivo.")).classes("studio-muted")
-                        precision = ui.select({"bf16": "BF16", "fp16": "FP16", "none": t("Precisão total")}, value="fp16", label=t("Precisão numérica")).props("outlined")
+                        ui.label(
+                            t(
+                                "O perfil sugerido usa precisão mista e tamanho de lote calculado pela VRAM. Reduza o lote se ocorrer falta de memória; use acumulação de gradiente para recuperar o tamanho efetivo."
+                            )
+                        ).classes("studio-muted")
+                        precision = ui.select(
+                            {"bf16": "BF16", "fp16": "FP16", "none": t("Precisão total")},
+                            value="fp16",
+                            label=t("Precisão numérica"),
+                        ).props("outlined")
                         use_8bit = ui.switch(t("Otimizador Adam de 8 bits · reduz memória da GPU"), value=False)
-                        with ui.expansion(t("Controles avançados de desempenho e treino"), icon="tune").classes("w-full"):
-                            batch_size = ui.number(t("Orçamento do lote (frames por GPU)"), value=3200, min=400, max=50000, step=256).props("outlined")
-                            max_samples = ui.number(t("Máximo de exemplos por lote"), value=8, min=1, max=256, step=1).props("outlined")
-                            grad_accumulation = ui.number(t("Acumulação de gradiente"), value=1, min=1, max=64, step=1).props("outlined")
-                            max_grad_norm = ui.number(t("Limite de clipping do gradiente"), value=1.0, min=0.1, max=10, step=0.1).props("outlined")
-                            num_workers = ui.number(t("Workers de leitura de dados na CPU"), value=8, min=0, max=32, step=1).props("outlined")
-                            learning_rate = ui.number(t("Taxa de aprendizado"), value=0.00001, min=0.0000001, max=0.001, step=0.000001).props("outlined")
+                        with ui.expansion(t("Controles avançados de desempenho e treino"), icon="tune").classes(
+                            "w-full"
+                        ):
+                            batch_size = ui.number(
+                                t("Orçamento do lote (frames por GPU)"), value=3200, min=400, max=50000, step=256
+                            ).props("outlined")
+                            max_samples = ui.number(
+                                t("Máximo de exemplos por lote"), value=8, min=1, max=256, step=1
+                            ).props("outlined")
+                            grad_accumulation = ui.number(
+                                t("Acumulação de gradiente"), value=1, min=1, max=64, step=1
+                            ).props("outlined")
+                            max_grad_norm = ui.number(
+                                t("Limite de clipping do gradiente"), value=1.0, min=0.1, max=10, step=0.1
+                            ).props("outlined")
+                            num_workers = ui.number(
+                                t("Workers de leitura de dados na CPU"), value=8, min=0, max=32, step=1
+                            ).props("outlined")
+                            learning_rate = ui.number(
+                                t("Taxa de aprendizado"), value=0.00001, min=0.0000001, max=0.001, step=0.000001
+                            ).props("outlined")
                             epochs = ui.number(t("Épocas"), value=20, min=1, max=10000, step=1).props("outlined")
-                            warmup = ui.number(t("Atualizações de warmup"), value=100, min=0, max=100000, step=10).props("outlined")
-                            save_every = ui.number(t("Salvar checkpoint a cada atualizações"), value=100, min=10, max=100000, step=10).props("outlined")
-                            keep_checkpoints = ui.number(t("Manter checkpoints recentes"), value=5, min=1, max=1000, step=1).props("outlined")
+                            warmup = ui.number(
+                                t("Atualizações de warmup"), value=100, min=0, max=100000, step=10
+                            ).props("outlined")
+                            save_every = ui.number(
+                                t("Salvar checkpoint a cada atualizações"), value=100, min=10, max=100000, step=10
+                            ).props("outlined")
+                            keep_checkpoints = ui.number(
+                                t("Manter checkpoints recentes"), value=5, min=1, max=1000, step=1
+                            ).props("outlined")
 
                         async def apply_gpu_profile():
                             profile = await action(service.gpu_training_recommendation)
@@ -289,24 +361,45 @@ def register_training_pages(service, shell, action, audio_upload):
                             try:
                                 result = await action(service.start_training, state["project"], collect_options())
                                 if result is not None:
-                                    ui.notify(t("Treinamento iniciado. Acompanhe GPU, andamento e checkpoints nesta tela."), type="positive")
+                                    ui.notify(
+                                        t("Treinamento iniciado. Acompanhe GPU, andamento e checkpoints nesta tela."),
+                                        type="positive",
+                                    )
                             finally:
                                 start_button.enable()
 
                         with ui.row().classes("w-full flex-wrap"):
-                            ui.button(t("Otimizar para esta GPU"), icon="bolt", on_click=apply_gpu_profile).props("outline no-caps")
+                            ui.button(t("Otimizar para esta GPU"), icon="bolt", on_click=apply_gpu_profile).props(
+                                "outline no-caps"
+                            )
                             ui.button(t("Salvar configuração"), icon="save", on_click=save_options).props("no-caps")
-                            start_button = ui.button(t("Iniciar ou retomar treino"), icon="play_arrow", on_click=start_training).props("no-caps unelevated")
-                            ui.button(t("Parar com segurança"), icon="stop", on_click=lambda: action(service.stop_training)).props("outline no-caps")
-                        job_status = ui.label(service.job["message"]).classes("whitespace-pre-wrap w-full rounded-lg bg-slate-100 p-4 text-sm")
+                            start_button = ui.button(
+                                t("Iniciar ou retomar treino"), icon="play_arrow", on_click=start_training
+                            ).props("no-caps unelevated")
+                            ui.button(
+                                t("Parar com segurança"), icon="stop", on_click=lambda: action(service.stop_training)
+                            ).props("outline no-caps")
+                        job_status = ui.label(service.job["message"]).classes(
+                            "whitespace-pre-wrap w-full rounded-lg bg-slate-100 p-4 text-sm"
+                        )
                         ui.timer(1, lambda: job_status.set_text(t(service.job["message"])))
-                        ui.label(t("O modelo original e seus outros projetos permanecem intactos. O treino continua no último checkpoint deste projeto.")).classes("text-sm studio-muted")
+                        ui.label(
+                            t(
+                                "O modelo original e seus outros projetos permanecem intactos. O treino continua no último checkpoint deste projeto."
+                            )
+                        ).classes("text-sm studio-muted")
 
                 with ui.tab_panel(eval_tab):
                     with ui.card().classes("studio-card w-full gap-4"):
                         ui.label(t("Comparação justa entre checkpoints")).classes("font-semibold text-lg")
-                        ui.label(t("Use a mesma referência e a mesma frase. Marque várias versões para gerar uma sequência de amostras comparáveis.")).classes("studio-muted")
-                        checkpoints = ui.select({}, label=t("Checkpoints do projeto"), multiple=True).props("outlined use-chips")
+                        ui.label(
+                            t(
+                                "Use a mesma referência e a mesma frase. Marque várias versões para gerar uma sequência de amostras comparáveis."
+                            )
+                        ).classes("studio-muted")
+                        checkpoints = ui.select({}, label=t("Checkpoints do projeto"), multiple=True).props(
+                            "outlined use-chips"
+                        )
 
                         async def refresh_checkpoints():
                             if not state["project"]:
@@ -316,17 +409,32 @@ def register_training_pages(service, shell, action, audio_upload):
                                 checkpoints.set_options({path: Path(path).name for path in found})
                                 available_checkpoint.set_options({path: Path(path).name for path in found})
                                 if found:
-                                    ui.notify(t("{value_0} checkpoints encontrados.", value_0=len(found)), type="positive")
+                                    ui.notify(
+                                        t("{value_0} checkpoints encontrados.", value_0=len(found)), type="positive"
+                                    )
 
                         with ui.row():
-                            ui.button(t("Atualizar checkpoints"), icon="refresh", on_click=refresh_checkpoints).props("flat no-caps")
-                            ui.button(t("Selecionar todos"), icon="select_all", on_click=lambda: checkpoints.set_value(list(checkpoints.options))).props("flat no-caps")
-                        voice = ui.select(voices, label=t("Usar referência de voz salva"), clearable=True).props("outlined")
+                            ui.button(t("Atualizar checkpoints"), icon="refresh", on_click=refresh_checkpoints).props(
+                                "flat no-caps"
+                            )
+                            ui.button(
+                                t("Selecionar todos"),
+                                icon="select_all",
+                                on_click=lambda: checkpoints.set_value(list(checkpoints.options)),
+                            ).props("flat no-caps")
+                        voice = ui.select(voices, label=t("Usar referência de voz salva"), clearable=True).props(
+                            "outlined"
+                        )
                         reference_paths = []
-                        reference_status = ui.label(t("Ou envie uma referência para esta comparação.")).classes("studio-muted text-sm")
+                        reference_status = ui.label(t("Ou envie uma referência para esta comparação.")).classes(
+                            "studio-muted text-sm"
+                        )
                         audio_upload(reference_paths, reference_status, reference=True)
                         reference_text = ui.textarea(t("Transcrição da referência (opcional)")).props("outlined rows=2")
-                        test_text = ui.textarea(t("Texto fixo para comparar todas as versões"), value=t("Olá! Esta é uma comparação da minha voz.")).props("outlined rows=3")
+                        test_text = ui.textarea(
+                            t("Texto fixo para comparar todas as versões"),
+                            value=t("Olá! Esta é uma comparação da minha voz."),
+                        ).props("outlined rows=3")
                         comparison_status = ui.label("").classes("whitespace-pre-wrap studio-muted")
                         result_area = ui.column().classes("w-full gap-3")
 
@@ -334,8 +442,14 @@ def register_training_pages(service, shell, action, audio_upload):
                             if not state["project"] or not checkpoints.value:
                                 ui.notify(t("Abra um projeto e selecione pelo menos um checkpoint."), type="warning")
                                 return
-                            selected_voice = next((item for item in service.read()["voices"] if item["id"] == voice.value), None)
-                            ref = selected_voice["reference"] if selected_voice else (reference_paths[-1] if reference_paths else None)
+                            selected_voice = next(
+                                (item for item in service.read()["voices"] if item["id"] == voice.value), None
+                            )
+                            ref = (
+                                selected_voice["reference"]
+                                if selected_voice
+                                else (reference_paths[-1] if reference_paths else None)
+                            )
                             transcript = selected_voice["transcript"] if selected_voice else reference_text.value
                             if not ref:
                                 ui.notify(t("Escolha ou envie uma referência de voz."), type="warning")
@@ -346,7 +460,14 @@ def register_training_pages(service, shell, action, audio_upload):
                             try:
                                 selected = list(checkpoints.value)
                                 for index, path in enumerate(selected, 1):
-                                    comparison_status.set_text(t("Gerando {value_0} de {value_1}: {value_2}", value_0=index, value_1=len(selected), value_2=Path(path).name))
+                                    comparison_status.set_text(
+                                        t(
+                                            "Gerando {value_0} de {value_1}: {value_2}",
+                                            value_0=index,
+                                            value_1=len(selected),
+                                            value_2=Path(path).name,
+                                        )
+                                    )
                                     entry = await run.io_bound(
                                         partial(
                                             service.generate,
@@ -363,32 +484,58 @@ def register_training_pages(service, shell, action, audio_upload):
                                         with ui.card().classes("studio-card w-full"):
                                             ui.label(Path(path).name).classes("font-semibold")
                                             ui.audio(entry["path"]).classes("w-full")
-                                            rating = ui.radio({"Ficou bom": t("Ficou bom"), "Precisa melhorar": t("Precisa melhorar")})
+                                            rating = ui.radio(
+                                                {"Ficou bom": t("Ficou bom"), "Precisa melhorar": t("Precisa melhorar")}
+                                            )
                                             note = ui.input(t("Observação")).props("outlined")
 
                                             async def save_rating(item=entry, rate=rating, comment=note):
                                                 if rate.value:
-                                                    await action(service.rate, item["id"], rate.value, comment.value or "")
+                                                    await action(
+                                                        service.rate, item["id"], rate.value, comment.value or ""
+                                                    )
 
-                                            ui.button(t("Salvar avaliação"), icon="thumb_up", on_click=save_rating).props("flat no-caps")
-                                            reference_name = ui.input(t("Nome da nova referência de estilo"), value="Estilo · " + Path(path).stem).props("outlined")
+                                            ui.button(
+                                                t("Salvar avaliação"), icon="thumb_up", on_click=save_rating
+                                            ).props("flat no-caps")
+                                            reference_name = ui.input(
+                                                t("Nome da nova referência de estilo"),
+                                                value="Estilo · " + Path(path).stem,
+                                            ).props("outlined")
 
                                             async def save_reference(item=entry, name=reference_name):
-                                                result = await action(service.save_generated_reference, name.value, item["path"], item["text"])
+                                                result = await action(
+                                                    service.save_generated_reference,
+                                                    name.value,
+                                                    item["path"],
+                                                    item["text"],
+                                                )
                                                 if result:
                                                     ui.notify(t("Referência salva em Minhas vozes."), type="positive")
 
-                                            ui.button(t("Salvar como referência de estilo"), icon="record_voice_over", on_click=save_reference).props("flat no-caps")
-                                comparison_status.set_text(t("Comparação concluída. Ouça as versões lado a lado e registre sua avaliação."))
+                                            ui.button(
+                                                t("Salvar como referência de estilo"),
+                                                icon="record_voice_over",
+                                                on_click=save_reference,
+                                            ).props("flat no-caps")
+                                comparison_status.set_text(
+                                    t("Comparação concluída. Ouça as versões lado a lado e registre sua avaliação.")
+                                )
                             finally:
                                 compare_button.enable()
 
-                        compare_button = ui.button(t("Gerar comparação"), icon="graphic_eq", on_click=compare).props("no-caps unelevated")
+                        compare_button = ui.button(t("Gerar comparação"), icon="graphic_eq", on_click=compare).props(
+                            "no-caps unelevated"
+                        )
 
                 with ui.tab_panel(deploy_tab):
                     with ui.card().classes("studio-card w-full gap-4"):
                         ui.label(t("Publicar um checkpoint para usar em Criar áudio")).classes("font-semibold text-lg")
-                        ui.label(t("Isso cadastra o arquivo na biblioteca local e preserva o projeto de treinamento. Não copia os pesos novamente.")).classes("studio-muted")
+                        ui.label(
+                            t(
+                                "Isso cadastra o arquivo na biblioteca local e preserva o projeto de treinamento. Não copia os pesos novamente."
+                            )
+                        ).classes("studio-muted")
                         available_checkpoint = ui.select({}, label=t("Checkpoint aprovado")).props("outlined")
                         model_name = ui.input(t("Nome para aparecer em Meus modelos")).props("outlined")
 
@@ -404,7 +551,14 @@ def register_training_pages(service, shell, action, audio_upload):
                                 architecture.value,
                             )
                             if result:
-                                ui.notify(t("Checkpoint cadastrado em Meus modelos e disponível para inferência."), type="positive")
+                                ui.notify(
+                                    t("Checkpoint cadastrado em Meus modelos e disponível para inferência."),
+                                    type="positive",
+                                )
 
-                        ui.button(t("Disponibilizar para inferência"), icon="rocket_launch", on_click=publish).props("no-caps unelevated")
-                        ui.button(t("Abrir Meus modelos"), icon="inventory_2", on_click=lambda: ui.navigate.to("/models")).props("flat no-caps")
+                        ui.button(t("Disponibilizar para inferência"), icon="rocket_launch", on_click=publish).props(
+                            "no-caps unelevated"
+                        )
+                        ui.button(
+                            t("Abrir Meus modelos"), icon="inventory_2", on_click=lambda: ui.navigate.to("/models")
+                        ).props("flat no-caps")
