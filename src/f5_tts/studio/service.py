@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from datetime import datetime, timezone
 from importlib.resources import files
 from pathlib import Path, PureWindowsPath
@@ -21,6 +22,23 @@ from f5_tts.studio.i18n import INTERFACE_LANGUAGES, translate
 from f5_tts.studio.local_tools import LocalTools
 from f5_tts.studio.story_tools import StoryTools
 from f5_tts.train.guided_training import TrainingProject, import_ready_audio
+
+
+class _InferenceProgress:
+    def __init__(self, callback):
+        self.callback = callback
+        self.lock = threading.Lock()
+        self.fractions = []
+
+    def update(self, batch_index, step, total_steps, batch_count):
+        with self.lock:
+            if len(self.fractions) != batch_count:
+                self.fractions = [0.0] * batch_count
+            self.fractions[batch_index] = min(1.0, step / max(1, total_steps))
+            fraction = sum(self.fractions) / batch_count
+            completed = sum(value >= 1 for value in self.fractions)
+        percent = 8 + 82 * fraction
+        self.callback(percent, f"Inferindo · {completed}/{batch_count} trechos")
 
 
 class StudioService(StoryTools, LocalTools):
@@ -37,6 +55,10 @@ class StudioService(StoryTools, LocalTools):
         self._model_key = None
         self._operation = threading.Lock()
         self._storage = threading.RLock()
+        self._generation_lock = threading.Lock()
+        self._generation_status = {"running": False, "percent": 0.0, "message": "Aguardando geração."}
+        self._metrics_lock = threading.Lock()
+        self._previous_disk_io = None
         self._interface_language = self.read().get("ui_language", "pt-BR")
         if self._interface_language not in INTERFACE_LANGUAGES:
             self._interface_language = "pt-BR"
@@ -256,6 +278,52 @@ class StudioService(StoryTools, LocalTools):
         except (OSError, subprocess.SubprocessError, ValueError, IndexError):
             pass
         return result
+
+    def set_generation_status(self, running, percent, message):
+        with self._generation_lock:
+            self._generation_status = {
+                "running": bool(running),
+                "percent": max(0.0, min(100.0, float(percent))),
+                "message": str(message),
+            }
+
+    def generation_status(self):
+        with self._generation_lock:
+            return dict(self._generation_status)
+
+    def system_metrics(self):
+        """Capture host and accelerator usage while an audio job is active."""
+        import psutil
+
+        cpu = psutil.cpu_percent(interval=0.05)
+        memory = psutil.virtual_memory()
+        disk = shutil.disk_usage(self.home)
+        counters = psutil.disk_io_counters()
+        read_mbps = write_mbps = 0.0
+        now = time.monotonic()
+        if counters:
+            with self._metrics_lock:
+                previous = self._previous_disk_io
+                if previous:
+                    elapsed = max(0.001, now - previous[0])
+                    read_mbps = max(0, counters.read_bytes - previous[1]) / elapsed / (1024**2)
+                    write_mbps = max(0, counters.write_bytes - previous[2]) / elapsed / (1024**2)
+                self._previous_disk_io = (now, counters.read_bytes, counters.write_bytes)
+        hardware = self.training_hardware()
+        return {
+            "cpu_percent": cpu,
+            "ram_used_gb": (memory.total - memory.available) / (1024**3),
+            "ram_total_gb": memory.total / (1024**3),
+            "ram_percent": memory.percent,
+            "disk_used_percent": (disk.used / disk.total * 100) if disk.total else 0,
+            "disk_free_gb": disk.free / (1024**3),
+            "disk_read_mbps": read_mbps,
+            "disk_write_mbps": write_mbps,
+            "gpu_name": hardware["name"],
+            "gpu_percent": hardware.get("utilization"),
+            "gpu_vram_used_gb": hardware.get("allocated", 0),
+            "gpu_vram_total_gb": hardware.get("memory", 0),
+        }
 
     def checkpoints(self, project):
         p = self.project(project)
@@ -492,6 +560,7 @@ class StudioService(StoryTools, LocalTools):
             raise ValueError("Escolha um formato e uma qualidade de áudio válidos.")
         if not self._operation.acquire(blocking=False):
             raise ValueError("Aguarde a operação atual ou pare o treinamento antes de gerar áudio.")
+        self.set_generation_status(True, 1, "Validando texto e referência.")
         try:
             data = self.read()
             if voice_id:
@@ -535,6 +604,7 @@ class StudioService(StoryTools, LocalTools):
                 self.model_version(vocabulary),
             )
             if self._model_key != key:
+                self.set_generation_status(True, 3, "Carregando modelo e vocoder.")
                 self._model = None
                 gc.collect()
                 if torch.cuda.is_available():
@@ -551,9 +621,11 @@ class StudioService(StoryTools, LocalTools):
                     device=None if settings["device"] == "auto" else settings["device"],
                 )
                 self._model_key = key
+            self.set_generation_status(True, 7, "Preparando a inferência.")
             identifier = uuid4().hex
             path = self.outputs / (identifier + "." + output_format)
             spoken_text = self.pronounce(text.strip(), data.get("pronunciations", {}))
+            progress = _InferenceProgress(self.set_generation_status)
             with tempfile.TemporaryDirectory(prefix="f5-studio-") as temp_dir:
                 source = Path(temp_dir) / "generated.wav"
                 self._model.infer(
@@ -563,10 +635,13 @@ class StudioService(StoryTools, LocalTools):
                     nfe_step=settings["steps"],
                     speed=settings["speed"],
                     seed=42,
+                    progress=None,
+                    progress_callback=progress.update,
                     file_wave=str(source),
                 )
                 if not source.exists():
                     raise RuntimeError("O modelo não produziu o arquivo de áudio.")
+                self.set_generation_status(True, 92, "Finalizando e exportando o áudio.")
                 self._export_generated_audio(source, path, output_format, output_quality, remove_noise, stereo)
             entry = {
                 "id": identifier,
@@ -594,7 +669,12 @@ class StudioService(StoryTools, LocalTools):
                 data = self.read()
                 data["history"].insert(0, entry)
                 self.write(data)
+            self.set_generation_status(False, 100, "Geração concluída.")
             return entry
+        except Exception:
+            current = self.generation_status()
+            self.set_generation_status(False, current["percent"], "A geração não foi concluída.")
+            raise
         finally:
             self._operation.release()
 

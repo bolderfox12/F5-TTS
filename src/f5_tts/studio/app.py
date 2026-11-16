@@ -51,6 +51,13 @@ def register_pages(service):
             ui.notify(t(str(error)), type="negative", close_button=True, timeout=10000)
             return None
 
+    def metric_card(title, initial, icon):
+        with ui.card().classes("studio-tool-card p-3 gap-1").style("flex:1 1 180px;min-width:160px"):
+            with ui.row().classes("items-center gap-2"):
+                ui.icon(icon, color="primary", size="18px")
+                ui.label(title).classes("text-xs font-semibold uppercase tracking-wide")
+            return ui.label(initial).classes("text-sm font-medium break-words")
+
     def shell(section):
         ui.context.client.page.language = service.interface_language()
         ui.colors(primary="#137d80", secondary="#294d5b", accent="#2bb5a7")
@@ -322,6 +329,68 @@ def register_pages(service):
                             t("Baixar áudio"), icon="download", on_click=lambda: ui.download.file(generated["path"])
                         ).props("flat no-caps")
                         download.disable()
+                        ui.separator()
+                        ui.label(t("Progresso da geração")).classes("font-semibold")
+                        generation_message = ui.label(t("Aguardando geração.")).classes("text-sm studio-muted")
+                        generation_bar = ui.linear_progress(value=0, show_value=False).props("rounded")
+                        with ui.row().classes("w-full gap-2 flex-wrap"):
+                            cpu_metric = metric_card(t("CPU"), t("Aguardando dados"), "memory")
+                            gpu_metric = metric_card(t("GPU"), t("Aguardando dados"), "developer_board")
+                            ram_metric = metric_card(t("Memória RAM"), t("Aguardando dados"), "database")
+                            disk_metric = metric_card(t("SSD / disco"), t("Aguardando dados"), "storage")
+
+                        ui.label(
+                            t(
+                                "Uso do disco é do sistema inteiro; espaço livre corresponde à unidade onde o Studio guarda os arquivos."
+                            )
+                        ).classes("text-xs studio-muted")
+
+                        async def update_generation_display():
+                            progress = service.generation_status()
+                            generation_bar.set_value(progress["percent"] / 100)
+                            generation_message.set_text(
+                                t(
+                                    "{value_0} · {value_1}%",
+                                    value_0=t(progress["message"]),
+                                    value_1=f"{progress['percent']:.0f}",
+                                )
+                            )
+                            if not progress["running"]:
+                                return
+                            metrics = await run.io_bound(service.system_metrics)
+                            cpu_metric.set_text(t("{value_0}%", value_0=f"{metrics['cpu_percent']:.0f}"))
+                            if metrics["gpu_vram_total_gb"]:
+                                gpu_use = "—" if metrics["gpu_percent"] is None else f"{metrics['gpu_percent']}%"
+                                gpu_metric.set_text(
+                                    t(
+                                        "{value_0} · {value_1} · VRAM {value_2}/{value_3} GB",
+                                        value_0=metrics["gpu_name"],
+                                        value_1=gpu_use,
+                                        value_2=f"{metrics['gpu_vram_used_gb']:.1f}",
+                                        value_3=f"{metrics['gpu_vram_total_gb']:.1f}",
+                                    )
+                                )
+                            else:
+                                gpu_metric.set_text(t("GPU não detectada; gerando pela CPU."))
+                            ram_metric.set_text(
+                                t(
+                                    "{value_0}/{value_1} GB · {value_2}%",
+                                    value_0=f"{metrics['ram_used_gb']:.1f}",
+                                    value_1=f"{metrics['ram_total_gb']:.1f}",
+                                    value_2=f"{metrics['ram_percent']:.0f}",
+                                )
+                            )
+                            disk_metric.set_text(
+                                t(
+                                    "{value_0}% usado · {value_1} GB livre · ↓ {value_2} / ↑ {value_3} MB/s",
+                                    value_0=f"{metrics['disk_used_percent']:.0f}",
+                                    value_1=f"{metrics['disk_free_gb']:.1f}",
+                                    value_2=f"{metrics['disk_read_mbps']:.1f}",
+                                    value_3=f"{metrics['disk_write_mbps']:.1f}",
+                                )
+                            )
+
+                        ui.timer(0.75, update_generation_display)
                     with ui.card().classes("studio-card w-full"):
                         ui.icon("lightbulb", color="primary", size="28px")
                         ui.label(t("Uma boa referência faz diferença.")).classes("font-semibold")

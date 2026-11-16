@@ -99,6 +99,7 @@ class CFM(nn.Module):
         duplicate_test=False,
         t_inter=0.1,
         edit_mask=None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ):
         self.eval()
         # raw wave
@@ -160,6 +161,7 @@ class CFM(nn.Module):
         # neural ode
 
         def fn(t, x):
+            nonlocal completed_steps
             # at each step, conditioning is fixed
             # step_cond = torch.where(cond_mask, cond, torch.zeros_like(cond))
 
@@ -175,6 +177,9 @@ class CFM(nn.Module):
                     drop_text=False,
                     cache=True,
                 )
+                completed_steps += 1
+                if progress_callback:
+                    progress_callback(completed_steps, total_steps)
                 return pred
 
             # predict flow (cond and uncond), for classifier-free guidance
@@ -188,7 +193,11 @@ class CFM(nn.Module):
                 cache=True,
             )
             pred, null_pred = torch.chunk(pred_cfg, 2, dim=0)
-            return pred + (pred - null_pred) * cfg_strength
+            result = pred + (pred - null_pred) * cfg_strength
+            completed_steps += 1
+            if progress_callback:
+                progress_callback(completed_steps, total_steps)
+            return result
 
         # noise input
         # to make sure batch inference result is same with different batch size, and for sure single inference
@@ -212,6 +221,8 @@ class CFM(nn.Module):
             t = get_epss_timesteps(steps, device=self.device, dtype=step_cond.dtype)
         else:
             t = torch.linspace(t_start, 1, steps + 1, device=self.device, dtype=step_cond.dtype)
+        total_steps = len(t) - 1
+        completed_steps = 0
         if sway_sampling_coef is not None:
             t = t + sway_sampling_coef * (torch.cos(torch.pi / 2 * t) - 1 + t)
 

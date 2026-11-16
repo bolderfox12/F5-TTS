@@ -109,6 +109,7 @@ class F5TTS:
         file_wave=None,
         file_spec=None,
         seed=None,
+        progress_callback=None,
     ):
         if seed is None:
             seed = random.randint(0, sys.maxsize)
@@ -126,6 +127,7 @@ class F5TTS:
             self.mel_spec_type,
             show_info=show_info,
             progress=progress,
+            progress_callback=progress_callback,
             target_rms=target_rms,
             cross_fade_duration=cross_fade_duration,
             nfe_step=nfe_step,

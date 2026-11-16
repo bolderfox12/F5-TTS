@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.4 — 2026-11-15
+
+### Added
+
+- Inference-step progress reporting and live CPU, GPU/VRAM, RAM, and disk telemetry on the generation page.
+- Optional `psutil` dependency in the Studio extra for host resource monitoring.
+
 ## 1.3.3 — 2026-11-15
 
 ### Added

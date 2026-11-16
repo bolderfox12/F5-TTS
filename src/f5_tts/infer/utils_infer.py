@@ -392,6 +392,7 @@ def infer_process(
     speed=speed,
     fix_duration=fix_duration,
     device=device,
+    progress_callback=None,
 ):
     # Split the input text into batches
     audio, sr = load_audio(ref_audio)
@@ -424,6 +425,7 @@ def infer_process(
             speed=speed,
             fix_duration=fix_duration,
             device=device,
+            progress_callback=progress_callback,
         )
     )
 
@@ -449,6 +451,7 @@ def infer_batch_process(
     device=None,
     streaming=False,
     chunk_size=2048,
+    progress_callback=None,
 ):
     audio, sr = ref_audio
     if audio.shape[0] > 1:
@@ -480,7 +483,7 @@ def infer_batch_process(
     else:
         fix_durations = [fix_duration] * len(gen_text_batches)
 
-    def _infer_basic(gen_text, fix_dur):
+    def _infer_basic(gen_text, fix_dur, batch_index=0):
         local_speed = speed
         if len(gen_text.encode("utf-8")) < 10:
             local_speed = speed * 0.3
@@ -507,6 +510,11 @@ def infer_batch_process(
                 steps=nfe_step,
                 cfg_strength=cfg_strength,
                 sway_sampling_coef=sway_sampling_coef,
+                progress_callback=(
+                    lambda step, total: progress_callback(batch_index, step, total, len(gen_text_batches))
+                    if progress_callback
+                    else None
+                ),
             )
             del _
 
@@ -525,27 +533,30 @@ def infer_batch_process(
 
         return generated_wave, generated
 
-    def infer_single_process(gen_text, fix_dur):
-        generated_wave, generated = _infer_basic(gen_text, fix_dur)
+    def infer_single_process(gen_text, fix_dur, batch_index):
+        generated_wave, generated = _infer_basic(gen_text, fix_dur, batch_index)
         generated_cpu = generated[0].cpu().numpy()
         del generated
         return generated_wave, generated_cpu
 
-    def infer_single_process_streaming(gen_text, fix_dur):
+    def infer_single_process_streaming(gen_text, fix_dur, batch_index):
         # for src/f5_tts/socket_server.py
-        generated_wave, generated = _infer_basic(gen_text, fix_dur)
+        generated_wave, generated = _infer_basic(gen_text, fix_dur, batch_index)
         del generated
         for j in range(0, len(generated_wave), chunk_size):
             yield generated_wave[j : j + chunk_size], target_sample_rate
 
     if streaming:
         batches_iter = progress.tqdm(gen_text_batches) if progress is not None else gen_text_batches
-        for gen_text, fix_dur in zip(batches_iter, fix_durations):
-            for chunk in infer_single_process_streaming(gen_text, fix_dur):
+        for batch_index, (gen_text, fix_dur) in enumerate(zip(batches_iter, fix_durations)):
+            for chunk in infer_single_process_streaming(gen_text, fix_dur, batch_index):
                 yield chunk
     else:
         with ThreadPoolExecutor() as executor:
-            futures = [executor.submit(infer_single_process, gt, fd) for gt, fd in zip(gen_text_batches, fix_durations)]
+            futures = [
+                executor.submit(infer_single_process, gt, fd, index)
+                for index, (gt, fd) in enumerate(zip(gen_text_batches, fix_durations))
+            ]
             for future in progress.tqdm(futures) if progress is not None else futures:
                 result = future.result()
                 if result:

@@ -4687,5 +4687,176 @@
     "Die Originaldatei bleibt unverändert; das Ergebnis wird als neue Kopie gespeichert.",
     "原文件保持不变；结果将另存为新文件。",
     "元のファイルはそのままで、結果を新しいコピーとして保存します。"
+  ],
+  [
+    "Progresso da geração",
+    "Generation progress",
+    "Progreso de generación",
+    "Progression de la génération",
+    "Generierungsfortschritt",
+    "生成进度",
+    "生成の進捗"
+  ],
+  [
+    "Aguardando geração.",
+    "Waiting for generation.",
+    "Esperando la generación.",
+    "En attente de génération.",
+    "Warte auf Generierung.",
+    "等待生成。",
+    "生成を待っています。"
+  ],
+  [
+    "Aguardando dados",
+    "Waiting for data",
+    "Esperando datos",
+    "En attente des données",
+    "Warte auf Daten",
+    "等待数据",
+    "データを待っています"
+  ],
+  [
+    "Memória RAM",
+    "RAM",
+    "Memoria RAM",
+    "Mémoire vive",
+    "Arbeitsspeicher",
+    "内存",
+    "メモリ"
+  ],
+  [
+    "SSD / disco",
+    "SSD / disk",
+    "SSD / disco",
+    "SSD / disque",
+    "SSD / Laufwerk",
+    "SSD / 磁盘",
+    "SSD / ディスク"
+  ],
+  [
+    "Uso do disco é do sistema inteiro; espaço livre corresponde à unidade onde o Studio guarda os arquivos.",
+    "Disk activity is system-wide; free space is for the drive where Studio stores its files.",
+    "La actividad del disco es del sistema; el espacio libre corresponde a la unidad de Studio.",
+    "L’activité disque concerne tout le système ; l’espace libre est celui du lecteur de Studio.",
+    "Die Festplattenaktivität gilt systemweit; der freie Speicher bezieht sich auf das Studio-Laufwerk.",
+    "磁盘活动数据来自整个系统；可用空间对应 Studio 文件所在的磁盘。",
+    "ディスク使用状況はシステム全体、空き容量は Studio の保存先ドライブを示します。"
+  ],
+  [
+    "{value_0} · {value_1}%",
+    "{value_0} · {value_1}%",
+    "{value_0} · {value_1}%",
+    "{value_0} · {value_1}%",
+    "{value_0} · {value_1}%",
+    "{value_0} · {value_1}%",
+    "{value_0} · {value_1}%"
+  ],
+  [
+    "Inferindo · {value_0}/{value_1} trechos",
+    "Generating · {value_0}/{value_1} chunks",
+    "Generando · {value_0}/{value_1} fragmentos",
+    "Génération · {value_0}/{value_1} segments",
+    "Generierung · {value_0}/{value_1} Abschnitte",
+    "推理中 · {value_0}/{value_1} 段",
+    "生成中 · {value_0}/{value_1} チャンク"
+  ],
+  [
+    "Validando texto e referência.",
+    "Validating text and reference.",
+    "Validando texto y referencia.",
+    "Validation du texte et de la référence.",
+    "Text und Referenz werden geprüft.",
+    "正在验证文本和参考音频。",
+    "テキストと参照音声を確認しています。"
+  ],
+  [
+    "Carregando modelo e vocoder.",
+    "Loading model and vocoder.",
+    "Cargando el modelo y el vocoder.",
+    "Chargement du modèle et du vocodeur.",
+    "Modell und Vocoder werden geladen.",
+    "正在加载模型和声码器。",
+    "モデルとボコーダーを読み込んでいます。"
+  ],
+  [
+    "Preparando a inferência.",
+    "Preparing inference.",
+    "Preparando la inferencia.",
+    "Préparation de l’inférence.",
+    "Inferenz wird vorbereitet.",
+    "正在准备推理。",
+    "推論を準備しています。"
+  ],
+  [
+    "Finalizando e exportando o áudio.",
+    "Finishing and exporting audio.",
+    "Finalizando y exportando el audio.",
+    "Finalisation et exportation de l’audio.",
+    "Audio wird fertiggestellt und exportiert.",
+    "正在完成并导出音频。",
+    "音声を仕上げて書き出しています。"
+  ],
+  [
+    "Geração concluída.",
+    "Generation complete.",
+    "Generación completada.",
+    "Génération terminée.",
+    "Generierung abgeschlossen.",
+    "生成完成。",
+    "生成が完了しました。"
+  ],
+  [
+    "A geração não foi concluída.",
+    "Generation did not complete.",
+    "La generación no se completó.",
+    "La génération n’a pas abouti.",
+    "Die Generierung wurde nicht abgeschlossen.",
+    "生成未完成。",
+    "生成が完了しませんでした。"
+  ],
+  [
+    "{value_0}%",
+    "{value_0}%",
+    "{value_0}%",
+    "{value_0}%",
+    "{value_0}%",
+    "{value_0}%",
+    "{value_0}%"
+  ],
+  [
+    "{value_0} · {value_1} · VRAM {value_2}/{value_3} GB",
+    "{value_0} · {value_1} · VRAM {value_2}/{value_3} GB",
+    "{value_0} · {value_1} · VRAM {value_2}/{value_3} GB",
+    "{value_0} · {value_1} · VRAM {value_2}/{value_3} Go",
+    "{value_0} · {value_1} · VRAM {value_2}/{value_3} GB",
+    "{value_0} · {value_1} · 显存 {value_2}/{value_3} GB",
+    "{value_0} · {value_1} · VRAM {value_2}/{value_3} GB"
+  ],
+  [
+    "{value_0}/{value_1} GB · {value_2}%",
+    "{value_0}/{value_1} GB · {value_2}%",
+    "{value_0}/{value_1} GB · {value_2}%",
+    "{value_0}/{value_1} Go · {value_2}%",
+    "{value_0}/{value_1} GB · {value_2}%",
+    "{value_0}/{value_1} GB · {value_2}%",
+    "{value_0}/{value_1} GB · {value_2}%"
+  ],
+  [
+    "{value_0}% usado · {value_1} GB livre · ↓ {value_2} / ↑ {value_3} MB/s",
+    "{value_0}% used · {value_1} GB free · ↓ {value_2} / ↑ {value_3} MB/s",
+    "{value_0}% usado · {value_1} GB libre · ↓ {value_2} / ↑ {value_3} MB/s",
+    "{value_0}% utilisé · {value_1} Go libre · ↓ {value_2} / ↑ {value_3} Mo/s",
+    "{value_0}% belegt · {value_1} GB frei · ↓ {value_2} / ↑ {value_3} MB/s",
+    "已用 {value_0}% · 可用 {value_1} GB · ↓ {value_2} / ↑ {value_3} MB/s",
+    "使用 {value_0}% · 空き {value_1} GB · ↓ {value_2} / ↑ {value_3} MB/s"
+  ],
+  [
+    "GPU não detectada; gerando pela CPU.",
+    "No GPU detected; generating on the CPU.",
+    "No se detectó una GPU; se generará con la CPU.",
+    "Aucun GPU détecté ; génération sur le CPU.",
+    "Keine GPU erkannt; Generierung auf der CPU.",
+    "未检测到 GPU；将使用 CPU 生成。",
+    "GPU が見つかりません。CPU で生成します。"
   ]
 ]
