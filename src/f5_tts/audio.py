@@ -30,3 +30,29 @@ def audio_info(path):
     """Read duration metadata without decoding the entire file."""
     metadata = sf.info(path)
     return AudioInfo(sample_rate=metadata.samplerate, num_frames=metadata.frames)
+
+
+def local_audio_input(path):
+    """Restrict FFmpeg to recognized local audio containers without external tracks."""
+    with open(path, "rb") as stream:
+        header = stream.read(32)
+    if header[:4] in (b"RIFF", b"RF64", b"RIFX") and header[8:12] == b"WAVE":
+        format_name = "wav"
+    elif header.startswith(b"fLaC"):
+        format_name = "flac"
+    elif header.startswith(b"OggS"):
+        format_name = "ogg"
+    elif header.startswith(b"\x1a\x45\xdf\xa3"):
+        format_name = "matroska"
+    elif header[4:8] == b"ftyp":
+        format_name = "mov"
+    elif len(header) >= 2 and header[0] == 0xFF and header[1] & 0xF6 == 0xF0:
+        format_name = "aac"
+    elif header.startswith(b"ID3") or len(header) >= 2 and header[0] == 0xFF and header[1] & 0xE0 == 0xE0:
+        format_name = "mp3"
+    else:
+        raise ValueError("O arquivo não contém um formato de áudio reconhecido.")
+    options = ["-protocol_whitelist", "file,pipe", "-f", format_name]
+    if format_name == "mov":
+        options += ["-enable_drefs", "0", "-use_absolute_path", "0"]
+    return [*options, "-i", str(path)]

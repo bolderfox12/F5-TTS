@@ -9,11 +9,11 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 import tomli
-from cached_path import cached_path
 from hydra.utils import get_class
 from omegaconf import OmegaConf
 from unidecode import unidecode
 
+from f5_tts.checkpoint_io import download_hf_model_file
 from f5_tts.infer.utils_infer import (
     cfg_strength,
     cross_fade_duration,
@@ -288,12 +288,12 @@ elif model == "E2TTS_Base":
     ckpt_step = 1200000
 
 if not ckpt_file:
-    ckpt_file = str(cached_path(f"hf://SWivid/{repo_name}/{model}/model_{ckpt_step}.{ckpt_type}"))
+    ckpt_file = str(download_hf_model_file(f"hf://SWivid/{repo_name}/{model}/model_{ckpt_step}.{ckpt_type}"))
 elif ckpt_file.startswith("hf://"):
-    ckpt_file = str(cached_path(ckpt_file))
+    ckpt_file = str(download_hf_model_file(ckpt_file))
 
 if vocab_file.startswith("hf://"):
-    vocab_file = str(cached_path(vocab_file))
+    vocab_file = str(download_hf_model_file(vocab_file))
 
 print(f"Using {model}...")
 ema_model = load_model(

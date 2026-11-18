@@ -44,6 +44,9 @@ def register_model_pages(service, shell, action):
 
                 async def receive(event, target):
                     try:
+                        limit = 5_000_000 if target is vocabulary else 5_000_000_000
+                        if event.file.size() > limit:
+                            raise ValueError("O arquivo excede o tamanho permitido.")
                         path = service.model_upload_path(event.file.name)
                         await event.file.save(path)
                         target.set_value(str(path))

@@ -17,6 +17,7 @@ from torch.utils.data import DataLoader, Dataset, SequentialSampler
 from tqdm import tqdm
 
 from f5_tts.audio import save_audio
+from f5_tts.checkpoint_io import load_checkpoint_weights
 from f5_tts.model import CFM
 from f5_tts.model.dataset import DynamicBatchSampler, collate_fn
 from f5_tts.model.utils import default, exists
@@ -228,10 +229,7 @@ class Trainer:
             checkpoint = load_file(f"{self.checkpoint_path}/{latest_checkpoint}", device="cpu")
             checkpoint = {"ema_model_state_dict": checkpoint}
         elif latest_checkpoint.endswith(".pt"):
-            # checkpoint = torch.load(f"{self.checkpoint_path}/{latest_checkpoint}", map_location=self.accelerator.device)  # rather use accelerator.load_state ಥ_ಥ
-            checkpoint = torch.load(
-                f"{self.checkpoint_path}/{latest_checkpoint}", weights_only=True, map_location="cpu"
-            )
+            checkpoint = load_checkpoint_weights(f"{self.checkpoint_path}/{latest_checkpoint}", map_location="cpu")
 
         # patch for backward compatibility, 305e3ea
         for key in ["ema_model.mel_spec.mel_stft.mel_scale.fb", "ema_model.mel_spec.mel_stft.spectrogram.window"]:

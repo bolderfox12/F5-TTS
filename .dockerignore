@@ -5,3 +5,9 @@ __pycache__
 ckpts
 data
 outputs
+
+.studio
+.cache
+.env
+.env.*
+validacao-modelo-real.json

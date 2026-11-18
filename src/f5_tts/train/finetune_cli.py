@@ -1,14 +1,15 @@
 import argparse
 import os
 import random
+import re
 import shutil
 from copy import copy
 from importlib.resources import files
 
 import torch
 from accelerate.utils import set_seed
-from cached_path import cached_path
 
+from f5_tts.checkpoint_io import download_hf_model_file
 from f5_tts.model import CFM, DiT, Trainer, UNetT
 from f5_tts.model.dataset import load_dataset
 from f5_tts.model.utils import get_tokenizer
@@ -91,6 +92,8 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", args.dataset_name):
+        raise ValueError("Invalid training dataset name.")
     mel_spec_type = "bigvgan" if args.exp_name == "F5TTS_Base_bigvgan" else "vocos"
     if args.dataset_path:
         set_seed(args.seed)
@@ -125,7 +128,7 @@ def main():
         )
         if args.finetune and not resume:
             if args.pretrain is None:
-                ckpt_path = str(cached_path("hf://SWivid/F5-TTS/F5TTS_v1_Base/model_1250000.safetensors"))
+                ckpt_path = str(download_hf_model_file("hf://SWivid/F5-TTS/F5TTS_v1_Base/model_1250000.safetensors"))
             else:
                 ckpt_path = args.pretrain
 
@@ -145,7 +148,7 @@ def main():
         if args.finetune and not resume:
             if args.pretrain is None:
                 checkpoint = "model_1250000.pt" if mel_spec_type == "bigvgan" else "model_1200000.pt"
-                ckpt_path = str(cached_path(f"hf://SWivid/F5-TTS/{args.exp_name}/{checkpoint}"))
+                ckpt_path = str(download_hf_model_file(f"hf://SWivid/F5-TTS/{args.exp_name}/{checkpoint}"))
             else:
                 ckpt_path = args.pretrain
 
@@ -162,7 +165,7 @@ def main():
         )
         if args.finetune and not resume:
             if args.pretrain is None:
-                ckpt_path = str(cached_path("hf://SWivid/E2-TTS/E2TTS_Base/model_1200000.pt"))
+                ckpt_path = str(download_hf_model_file("hf://SWivid/E2-TTS/E2TTS_Base/model_1200000.pt"))
             else:
                 ckpt_path = args.pretrain
 

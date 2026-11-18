@@ -15,6 +15,8 @@ import soundfile as sf
 import torch
 import torchaudio
 
+from f5_tts.audio import local_audio_input
+
 
 LANGUAGES = {"pt": "por_Latn", "en": "eng_Latn", "es": "spa_Latn", "fr": "fra_Latn", "de": "deu_Latn"}
 ASR_MODELS = {"openai/whisper-small", "openai/whisper-large-v3-turbo"}
@@ -378,6 +380,7 @@ class LocalTools:
                 )
             import librosa
 
+            local_audio_input(source)
             samples, _ = librosa.load(source, sr=16000, mono=True)
             duration = len(samples) / 16000
             if duration < 0.1:
@@ -490,23 +493,32 @@ class LocalTools:
         if ffmpeg is None:
             raise ValueError("Instale o FFmpeg e adicione-o ao PATH para usar esta ferramenta.")
         output = self.outputs / (uuid4().hex + "." + output_format)
-        result = subprocess.run(
-            [
-                ffmpeg,
-                "-nostdin",
-                "-y",
-                "-i",
-                str(source),
-                "-vn",
-                "-af",
-                allowed[effect],
-                *(["-c:a", "libmp3lame", "-q:a", "2"] if output_format == "mp3" else ["-c:a", "pcm_s16le"]),
-                str(output),
-            ],
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    ffmpeg,
+                    "-nostdin",
+                    "-y",
+                    *local_audio_input(source),
+                    "-map",
+                    "0:a:0",
+                    "-vn",
+                    "-af",
+                    allowed[effect],
+                    *(["-c:a", "libmp3lame", "-q:a", "2"] if output_format == "mp3" else ["-c:a", "pcm_s16le"]),
+                    str(output),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            output.unlink(missing_ok=True)
+            raise ValueError(
+                "Não foi possível processar o áudio. Confira o formato e a instalação do FFmpeg."
+            ) from error
         if result.returncode != 0:
+            output.unlink(missing_ok=True)
             raise ValueError("Não foi possível processar o áudio. Confira o formato e a instalação do FFmpeg.")
         with self._storage:
             data = self.read()

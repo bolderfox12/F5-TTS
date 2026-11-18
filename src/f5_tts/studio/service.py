@@ -20,6 +20,7 @@ import numpy as np
 import soundfile as sf
 import torch
 
+from f5_tts.audio import local_audio_input
 from f5_tts.studio.i18n import INTERFACE_LANGUAGES, translate
 from f5_tts.studio.local_tools import LocalTools
 from f5_tts.studio.story_tools import StoryTools
@@ -50,6 +51,7 @@ class StudioService(StoryTools, LocalTools):
         self.data_root = Path(data_root or files("f5_tts").joinpath("../../data")).resolve()
         self.uploads = self.home / "uploads"
         self.outputs = self.home / "outputs"
+        self.home.mkdir(parents=True, exist_ok=True, mode=0o700)
         for folder in (self.uploads, self.outputs, self.data_root):
             folder.mkdir(parents=True, exist_ok=True)
         self._backend = backend
@@ -81,9 +83,16 @@ class StudioService(StoryTools, LocalTools):
 
     def write(self, data):
         with self._storage:
-            path = self.home / (uuid4().hex + ".tmp")
-            path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-            path.replace(self.home / "workspace.json")
+            temporary = tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=self.home, suffix=".tmp", delete=False
+            )
+            path = Path(temporary.name)
+            try:
+                with temporary:
+                    json.dump(data, temporary, ensure_ascii=False, indent=2)
+                path.replace(self.home / "workspace.json")
+            finally:
+                path.unlink(missing_ok=True)
 
     def interface_language(self):
         return self._interface_language
@@ -148,8 +157,9 @@ class StudioService(StoryTools, LocalTools):
                         "-v",
                         "error",
                         "-y",
-                        "-i",
-                        str(source),
+                        *local_audio_input(source),
+                        "-map",
+                        "0:a:0",
                         "-vn",
                         "-t",
                         "30",
@@ -196,6 +206,59 @@ class StudioService(StoryTools, LocalTools):
         if not 1 <= info.duration <= 30:
             raise ValueError("Use uma referência de 1 a 30 segundos; prefira até 12 segundos.")
         return str(path)
+
+    def recent_references(self):
+        data = self.read()
+        saved_paths = {voice["reference"] for voice in data.get("voices", [])}
+        candidates = {}
+        for entry in data.get("reference_library", []):
+            candidates[entry["path"]] = entry.get("transcript", "")
+        for entry in data.get("history", []):
+            if entry.get("reference") and not candidates.get(entry["reference"]):
+                candidates[entry["reference"]] = entry.get("reference_transcript", "")
+        for path in self.uploads.glob("*-microfone.wav"):
+            candidates.setdefault(str(path), "")
+
+        rows = []
+        roots = (self.uploads.resolve(), self.outputs.resolve())
+        external = set(data.get("external_assets", []))
+        for source, transcript in candidates.items():
+            try:
+                path = Path(source).resolve()
+                if str(path) in saved_paths or not path.is_file():
+                    continue
+                if str(path) not in external and not any(path.is_relative_to(root) for root in roots):
+                    continue
+                modified = path.stat().st_mtime
+            except OSError:
+                continue
+            display = path.name
+            if len(display) > 33 and display[32] == "-" and all(c in "0123456789abcdef" for c in display[:32]):
+                display = display[33:]
+            rows.append(
+                {
+                    "path": str(path),
+                    "name": display,
+                    "transcript": transcript,
+                    "recorded_at": datetime.fromtimestamp(modified).isoformat(timespec="seconds").replace("T", " "),
+                    "modified": modified,
+                }
+            )
+        return sorted(rows, key=lambda row: row["modified"], reverse=True)[:50]
+
+    def remember_reference(self, source, transcript=""):
+        path = str(self._managed_asset(source))
+        with self._storage:
+            data = self.read()
+            entries = data.setdefault("reference_library", [])
+            previous = next((item for item in entries if item["path"] == path), None)
+            if previous and not transcript:
+                return
+            data["reference_library"] = [
+                {"path": path, "transcript": transcript},
+                *(item for item in entries if item["path"] != path),
+            ][:100]
+            self.write(data)
 
     def save_voice(self, name, reference, transcript):
         if not name or not name.strip():
@@ -640,9 +703,9 @@ class StudioService(StoryTools, LocalTools):
                     raise ValueError("Escolha um modelo cadastrado.")
                 checkpoint, vocabulary, architecture = (model["checkpoint"], model["vocabulary"], model["architecture"])
                 if model_id == "original":
-                    from cached_path import cached_path
+                    from f5_tts.checkpoint_io import download_hf_model_file
 
-                    checkpoint = cached_path("hf://SWivid/F5-TTS/F5TTS_v1_Base/model_1250000.safetensors")
+                    checkpoint = download_hf_model_file("hf://SWivid/F5-TTS/F5TTS_v1_Base/model_1250000.safetensors")
 
             self._model, self._model_key = None, None
             gc.collect()
@@ -789,6 +852,8 @@ class StudioService(StoryTools, LocalTools):
                 "spoken_text": spoken_text,
                 "path": str(path),
                 "voice": voice_id,
+                "reference": reference,
+                "reference_transcript": transcript or "",
                 "project": project,
                 "checkpoint": checkpoint,
                 "model_version": version,
@@ -847,6 +912,7 @@ class StudioService(StoryTools, LocalTools):
                 with sf.SoundFile(joined, mode="w", samplerate=24000, channels=1, subtype="PCM_16") as audio:
                     last = None
                     spoken = []
+                    used_references = {}
                     for index, part in enumerate(parts):
                         if index:
                             audio.write(np.zeros(7200, dtype=np.float32))
@@ -864,6 +930,7 @@ class StudioService(StoryTools, LocalTools):
                         samples, _ = sf.read(last["path"], dtype="float32")
                         audio.write(samples)
                         spoken.append(last["spoken_text"])
+                        used_references[last["reference"]] = last["reference_transcript"]
                         Path(last["path"]).unlink()
                 self._export_generated_audio(joined, target, output_format, output_quality, noise_reduction, stereo)
             entry = {
@@ -875,12 +942,19 @@ class StudioService(StoryTools, LocalTools):
                 ),
                 "spoken_text": "\n\n".join(spoken),
                 "voice": None,
+                "reference": None,
+                "reference_transcript": "",
                 "turn_count": len(parts),
                 "format": output_format,
                 "quality": output_quality,
                 "noise_reduction": bool(noise_reduction),
                 "stereo": bool(stereo),
             }
+            for reference, transcript in used_references.items():
+                try:
+                    self.remember_reference(reference, transcript)
+                except ValueError:
+                    pass
             self._save_generation(entry)
             self.set_generation_status(False, 100, "Geração concluída.")
             return entry

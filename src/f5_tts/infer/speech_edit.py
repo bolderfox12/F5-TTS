@@ -10,10 +10,10 @@ from importlib.resources import files
 import torch
 import torch.nn.functional as F
 import torchaudio
-from cached_path import cached_path
 from hydra.utils import get_class
 from omegaconf import OmegaConf
 
+from f5_tts.checkpoint_io import download_hf_model_file
 from f5_tts.device_utils import get_default_device
 from f5_tts.infer.utils_infer import load_checkpoint, load_vocoder, save_spectrogram
 from f5_tts.model import CFM
@@ -54,7 +54,7 @@ n_fft = model_cfg.model.mel_spec.n_fft
 
 
 # ckpt_path = str(files("f5_tts").joinpath("../../")) + f"/ckpts/{exp_name}/model_{ckpt_step}.safetensors"
-ckpt_path = str(cached_path(f"hf://SWivid/F5-TTS/{exp_name}/model_{ckpt_step}.safetensors"))
+ckpt_path = str(download_hf_model_file(f"hf://SWivid/F5-TTS/{exp_name}/model_{ckpt_step}.safetensors"))
 output_dir = "tests"
 
 

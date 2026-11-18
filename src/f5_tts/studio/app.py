@@ -5,7 +5,9 @@ from pathlib import Path
 
 from nicegui import app, run, ui
 
+from f5_tts.audio import local_audio_input
 from f5_tts.studio.file_pages import register_file_pages
+from f5_tts.studio.http_security import StudioBrowserBoundary
 from f5_tts.studio.i18n import INTERFACE_LANGUAGES
 from f5_tts.studio.local_pages import register_local_pages
 from f5_tts.studio.microphone import Microphone
@@ -43,6 +45,7 @@ body { background: #f3f6f8; color: #172c37; font-family: Inter, system-ui, sans-
 
 
 def register_pages(service):
+    app.add_middleware(StudioBrowserBoundary)
     t = service.translate_ui
     app.on_shutdown(service.stop_training)
 
@@ -133,8 +136,15 @@ def register_pages(service):
 
     async def receive(event, paths, label, on_reference=None):
         try:
+            if event.file.size() > 100_000_000:
+                raise ValueError("Arquivo recusado. O limite é 100 MB por arquivo.")
             path = service.upload_path(event.file.name)
-            await event.file.save(path)
+            try:
+                await event.file.save(path)
+                await run.io_bound(local_audio_input, path)
+            except Exception:
+                path.unlink(missing_ok=True)
+                raise
             paths.append(str(path))
             label.set_text(t("{value_0} arquivo(s) enviado(s).", value_0=len(paths)))
             if on_reference:
@@ -184,13 +194,70 @@ def register_pages(service):
             with ui.row().classes("w-full gap-6 items-start flex-wrap md:flex-nowrap"):
                 with ui.card().classes("studio-card w-full md:w-2/3 gap-4"):
                     ui.label(t("01 / A voz")).classes("font-semibold text-lg")
-                    voices = {v["id"]: v["name"] for v in service.read()["voices"]}
-                    voice = ui.select(voices, label=t("Voz salva (opcional)"), clearable=True)
+                    saved_voices = {item["id"]: item for item in service.read()["voices"]}
+                    voices = {identifier: item["name"] for identifier, item in saved_voices.items()}
+                    recent = {item["path"]: item for item in service.recent_references()}
+                    with ui.card().classes("w-full gap-3 studio-tool-card"):
+                        ui.label(t("Minhas referências")).classes("font-semibold")
+                        voice = ui.select(voices, label=t("Referência favorita"), clearable=True).props("outlined")
+                        recent_selector = ui.select(
+                            {path: f"{item['name']} · {item['recorded_at']}" for path, item in recent.items()},
+                            label=t("Gravações e referências recentes"),
+                            clearable=True,
+                        ).props("outlined")
+                        with ui.row().classes("w-full items-end gap-2"):
+                            favorite_name = ui.input(t("Nome para salvar a referência atual")).props("outlined")
+                            favorite_button = ui.button(t("Salvar como favorita"), icon="bookmark_add").props(
+                                "outline no-caps"
+                            )
+                            favorite_button.disable()
+
+                        async def refresh_recent():
+                            latest = await run.io_bound(service.recent_references)
+                            recent.clear()
+                            recent.update({item["path"]: item for item in latest})
+                            recent_selector.set_options(
+                                {path: f"{item['name']} · {item['recorded_at']}" for path, item in recent.items()}
+                            )
+
+                        async def choose_recent(event):
+                            path = event.value
+                            if path in recent:
+                                paths.append(path)
+                                if voice.value:
+                                    voice.set_value(None)
+                                else:
+                                    await refresh_reference()
+
+                        recent_selector.on_value_change(choose_recent)
+
+                        async def save_favorite():
+                            source = active_reference()
+                            if not source:
+                                return
+                            favorite_button.disable()
+                            try:
+                                result = await action(
+                                    service.save_voice, favorite_name.value, source, reference_text.value
+                                )
+                                if result:
+                                    saved_voices[result["id"]] = result
+                                    voices[result["id"]] = result["name"]
+                                    voice.set_options(voices)
+                                    voice.set_value(result["id"])
+                                    favorite_name.set_value("")
+                                    recent_selector.set_value(None)
+                                    await refresh_recent()
+                                    ui.notify(t("Referência salva nas favoritas."), type="positive")
+                            finally:
+                                favorite_button.set_enabled(bool(active_reference()))
+
+                        favorite_button.on_click(save_favorite)
+
                     ui.label(
                         t("Grave pelo microfone ou envie uma referência curta. Prefira até 12 segundos, sem música.")
                     ).classes("studio-muted")
                     upload_status = ui.label(t("Nenhum arquivo enviado.")).classes("text-sm")
-                    saved_voices = {item["id"]: item for item in service.read()["voices"]}
 
                     def active_reference():
                         if voice.value:
@@ -198,6 +265,10 @@ def register_pages(service):
                         return paths[-1] if paths else ""
 
                     async def select_upload():
+                        recent_selector.set_value(None)
+                        if paths:
+                            await action(service.remember_reference, paths[-1])
+                            await refresh_recent()
                         if voice.value is not None:
                             voice.set_value(None)
                         else:
@@ -340,7 +411,8 @@ def register_pages(service):
                         gemini_assessment.clear()
                         gemini_reference_button.set_enabled(bool(source))
                         saved = saved_voices.get(voice.value, {})
-                        reference_text.set_value(saved.get("transcript", ""))
+                        reference_text.set_value(saved.get("transcript", recent.get(source, {}).get("transcript", "")))
+                        favorite_button.set_enabled(bool(source))
                         reference_audio.set_source(source)
                         reference_waveform.set_visibility(False)
                         reference_quality.set_visibility(False)
@@ -692,6 +764,7 @@ def register_pages(service):
                                     *settings,
                                 )
                             if result:
+                                await refresh_recent()
                                 generated.update(result)
                                 player.set_source(result["path"])
                                 download.enable()

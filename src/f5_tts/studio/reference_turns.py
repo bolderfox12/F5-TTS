@@ -19,14 +19,14 @@ def reference_turn_editor(t, script, voices, audio_upload, main_reference):
         )
         ui.link(t("Abrir Minhas vozes"), "/voices", new_tab=True)
 
-        options = {
-            "main": t("Referência principal"),
-            "upload": t("Enviar áudio para este trecho"),
-            **voices,
-        }
-
         @ui.refreshable
         def display_parts():
+            options = {
+                "main": t("Referência principal"),
+                "upload": t("Enviar áudio para este trecho"),
+                **voices,
+            }
+
             for index, part in enumerate(state["rows"], 1):
                 title = f"{index}. {part['speaker']}" if part["speaker"] else t("Trecho {number}", number=index)
                 with ui.expansion(title, caption=part["text"][:100], value=index == 1).classes("w-full"):

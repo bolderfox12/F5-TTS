@@ -29,6 +29,7 @@ from transformers import pipeline
 from vocos import Vocos
 
 from f5_tts.audio import load_audio
+from f5_tts.checkpoint_io import load_checkpoint_weights
 from f5_tts.device_utils import get_default_device
 from f5_tts.model import CFM
 from f5_tts.model.utils import convert_char_to_pinyin, get_tokenizer
@@ -110,7 +111,7 @@ def load_vocoder(vocoder_name="vocos", is_local=False, local_path="", device=dev
             config_path = hf_hub_download(repo_id=repo_id, cache_dir=hf_cache_dir, filename="config.yaml")
             model_path = hf_hub_download(repo_id=repo_id, cache_dir=hf_cache_dir, filename="pytorch_model.bin")
         vocoder = Vocos.from_hparams(config_path)
-        state_dict = torch.load(model_path, map_location="cpu", weights_only=True)
+        state_dict = load_checkpoint_weights(model_path, map_location="cpu")
         from vocos.feature_extractors import EncodecFeatures
 
         if isinstance(vocoder.feature_extractor, EncodecFeatures):
@@ -139,7 +140,7 @@ def load_vocoder(vocoder_name="vocos", is_local=False, local_path="", device=dev
         if (config.sampling_rate, config.num_mels, config.hop_size) != (24000, 100, 256):
             raise ValueError("O vocoder BigVGAN precisa usar 24 kHz, 100 bandas mel e hop de 256 amostras.")
         vocoder = bigvgan.BigVGAN(config, use_cuda_kernel=False)
-        weights = torch.load(weights_path, map_location="cpu", weights_only=True)["generator"]
+        weights = load_checkpoint_weights(weights_path, map_location="cpu")["generator"]
         if not any(key.endswith(".weight_g") for key in weights):
             vocoder.remove_weight_norm()
             vocoder.load_state_dict(weights)
@@ -213,7 +214,7 @@ def load_checkpoint(model, ckpt_path, device: str, dtype=None, use_ema=True):
 
         checkpoint = load_file(ckpt_path, device=device)
     else:
-        checkpoint = torch.load(ckpt_path, map_location=device, weights_only=True)
+        checkpoint = load_checkpoint_weights(ckpt_path, map_location=device)
 
     if use_ema:
         if ckpt_type == "safetensors":

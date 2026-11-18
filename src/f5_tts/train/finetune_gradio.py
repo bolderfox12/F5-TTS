@@ -22,7 +22,6 @@ import librosa
 import numpy as np
 import psutil
 import torch
-from cached_path import cached_path
 from datasets import Dataset as Dataset_
 from datasets.arrow_writer import ArrowWriter
 from safetensors.torch import load_file, save_file
@@ -30,7 +29,9 @@ from scipy.io import wavfile
 
 from f5_tts.api import F5TTS
 from f5_tts.audio import load_audio
+from f5_tts.checkpoint_io import download_hf_model_file, load_checkpoint_weights
 from f5_tts.device_utils import get_default_device
+from f5_tts.gradio_access import gradio_access
 from f5_tts.infer.utils_infer import transcribe
 from f5_tts.model.utils import convert_char_to_pinyin
 from f5_tts.train.guided_training import build_guided_training
@@ -328,8 +329,7 @@ def terminate_process_tree(pid, including_parent=True):
 
 def terminate_process(pid):
     if system == "Windows":
-        cmd = f"taskkill /t /f /pid {pid}"
-        os.system(cmd)
+        subprocess.run(["taskkill", "/t", "/f", "/pid", str(int(pid))], check=False)
     else:
         terminate_process_tree(pid)
 
@@ -402,66 +402,57 @@ def start_training(
         tokenizer_type = "custom"
 
     dataset_name = dataset_name.removesuffix("_pinyin").removesuffix("_char")
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", dataset_name):
+        raise ValueError("Invalid training dataset name.")
 
-    python = shlex.quote(sys.executable)
+    cmd = [sys.executable]
     if studio_options:
         gpu_count = int(studio_options["gpu_count"])
-        launcher = python
         if gpu_count > 1:
-            launcher += f" -m torch.distributed.run --standalone --nnodes=1 --nproc-per-node={gpu_count}"
+            cmd.extend(["-m", "torch.distributed.run", "--standalone", "--nnodes=1", f"--nproc-per-node={gpu_count}"])
     else:
-        launcher = f"{python} -m accelerate.commands.launch --mixed_precision={mixed_precision}"
+        cmd.extend(["-m", "accelerate.commands.launch", f"--mixed_precision={mixed_precision}"])
 
-    cmd = (
-        f"{launcher} {shlex.quote(file_train)} --exp_name {exp_name}"
-        f" --learning_rate {learning_rate}"
-        f" --batch_size_per_gpu {batch_size_per_gpu}"
-        f" --batch_size_type {batch_size_type}"
-        f" --max_samples {max_samples}"
-        f" --grad_accumulation_steps {grad_accumulation_steps}"
-        f" --max_grad_norm {max_grad_norm}"
-        f" --epochs {epochs}"
-        f" --num_warmup_updates {num_warmup_updates}"
-        f" --save_per_updates {save_per_updates}"
-        f" --keep_last_n_checkpoints {keep_last_n_checkpoints}"
-        f" --last_per_updates {last_per_updates}"
-        f" --dataset_name {dataset_name}"
-        f" --num_workers {int(num_workers)}"
-    )
-
-    if finetune:
-        cmd += " --finetune"
-
-    if file_checkpoint_train != "":
-        cmd += f" --pretrain {shlex.quote(file_checkpoint_train)}"
-
-    if tokenizer_file != "":
-        cmd += f" --tokenizer_path {shlex.quote(tokenizer_file)}"
-
-    cmd += f" --tokenizer {tokenizer_type}"
-
+    values = {
+        "exp_name": exp_name,
+        "learning_rate": learning_rate,
+        "batch_size_per_gpu": batch_size_per_gpu,
+        "batch_size_type": batch_size_type,
+        "max_samples": max_samples,
+        "grad_accumulation_steps": grad_accumulation_steps,
+        "max_grad_norm": max_grad_norm,
+        "epochs": epochs,
+        "num_warmup_updates": num_warmup_updates,
+        "save_per_updates": save_per_updates,
+        "keep_last_n_checkpoints": keep_last_n_checkpoints,
+        "last_per_updates": last_per_updates,
+        "dataset_name": dataset_name,
+        "num_workers": int(num_workers),
+        "tokenizer": tokenizer_type,
+    }
+    if file_checkpoint_train:
+        values["pretrain"] = file_checkpoint_train
+    if tokenizer_file:
+        values["tokenizer_path"] = tokenizer_file
     if logger != "none":
-        cmd += f" --logger {logger}"
-
+        values["logger"] = logger
     if studio_options:
-        cmd += f" --dataset_path {shlex.quote(studio_options['dataset_path'])}"
-        if studio_options["base_vocabulary_rows"] is not None:
-            cmd += f" --base_vocabulary_rows {int(studio_options['base_vocabulary_rows'])}"
-        cmd += f" --seed {int(studio_options['seed'])}"
-        cmd += f" --validation_percent {int(studio_options['validation_percent'])}"
-        cmd += f" --ram_cache_gib {float(studio_options['ram_cache_gib'])}"
-        if studio_options["activation_checkpointing"]:
-            cmd += " --activation_checkpointing"
-        if studio_options["tf32"]:
-            cmd += " --tf32"
+        for field in ("dataset_path", "base_vocabulary_rows", "seed", "validation_percent", "ram_cache_gib"):
+            if studio_options[field] is not None:
+                values[field] = studio_options[field]
 
-    if not studio_options or studio_options["log_samples"]:
-        cmd += " --log_samples"
+    cmd.extend([file_train, *(f"--{name}={value}" for name, value in values.items())])
+    for flag, enabled in (
+        ("finetune", finetune),
+        ("activation_checkpointing", studio_options and studio_options["activation_checkpointing"]),
+        ("tf32", studio_options and studio_options["tf32"]),
+        ("log_samples", not studio_options or studio_options["log_samples"]),
+        ("bnb_optimizer", ch_8bit_adam),
+    ):
+        if enabled:
+            cmd.append(f"--{flag}")
 
-    if ch_8bit_adam:
-        cmd += " --bnb_optimizer"
-
-    print("run command : \n" + cmd + "\n")
+    print("run command : \n" + shlex.join(cmd) + "\n")
 
     save_settings(
         dataset_name,
@@ -489,7 +480,7 @@ def start_training(
     try:
         if not stream:
             # Start the training process
-            training_process = subprocess.Popen(shlex.split(cmd))
+            training_process = subprocess.Popen(cmd)
 
             time.sleep(5)
             yield "train start", gr.update(interactive=False), gr.update(interactive=True)
@@ -514,7 +505,7 @@ def start_training(
                 env["ACCELERATE_USE_CPU"] = "false"
 
             training_process = subprocess.Popen(
-                shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, env=env
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, env=env
             )
             yield "Training started ...", gr.update(interactive=False), gr.update(interactive=True)
 
@@ -971,7 +962,7 @@ def calculate_train(
 
 def prune_checkpoint(checkpoint_path: str, new_checkpoint_path: str, save_ema: bool, safetensors: bool) -> str:
     try:
-        checkpoint = torch.load(checkpoint_path, weights_only=True)
+        checkpoint = load_checkpoint_weights(checkpoint_path)
         print("Original Checkpoint Keys:", checkpoint.keys())
 
         to_retain = "ema_model_state_dict" if save_ema else "model_state_dict"
@@ -1008,7 +999,7 @@ def expand_model_embeddings(ckpt_path, new_ckpt_path, num_new_tokens=42):
         ckpt = load_file(ckpt_path, device="cpu")
         ckpt = {"ema_model_state_dict": ckpt}
     elif ckpt_path.endswith(".pt"):
-        ckpt = torch.load(ckpt_path, map_location="cpu")
+        ckpt = load_checkpoint_weights(ckpt_path, map_location="cpu")
 
     ema_sd = ckpt.get("ema_model_state_dict", {})
     embed_key_ema = "ema_model.transformer.text_embed.text_embed.weight"
@@ -1080,11 +1071,11 @@ def vocab_extend(project_name, symbols, model_type):
         f.write("\n".join(vocab))
 
     if model_type == "F5TTS_v1_Base":
-        ckpt_path = str(cached_path("hf://SWivid/F5-TTS/F5TTS_v1_Base/model_1250000.safetensors"))
+        ckpt_path = str(download_hf_model_file("hf://SWivid/F5-TTS/F5TTS_v1_Base/model_1250000.safetensors"))
     elif model_type == "F5TTS_Base":
-        ckpt_path = str(cached_path("hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.pt"))
+        ckpt_path = str(download_hf_model_file("hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.pt"))
     elif model_type == "E2TTS_Base":
-        ckpt_path = str(cached_path("hf://SWivid/E2-TTS/E2TTS_Base/model_1200000.pt"))
+        ckpt_path = str(download_hf_model_file("hf://SWivid/E2-TTS/E2TTS_Base/model_1200000.pt"))
 
     vocab_size_new = len(miss_symbols)
 
@@ -1894,8 +1885,9 @@ Reduce the Base model size from 5GB to 1.3GB. The new checkpoint file prunes out
 @click.option("--api", "-a", default=True, is_flag=True, help="Allow API access")
 def main(port, host, share, api):
     global app
+    host, auth = gradio_access(host, share)
     print("Starting app...")
-    app.queue(api_open=api).launch(server_name=host, server_port=port, share=share)
+    app.queue(api_open=api).launch(server_name=host, server_port=port, share=share, auth=auth)
 
 
 if __name__ == "__main__":

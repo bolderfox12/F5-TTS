@@ -18,7 +18,7 @@ import soundfile as sf
 import torch
 import torchaudio
 
-from f5_tts.audio import load_audio, save_audio
+from f5_tts.audio import load_audio, local_audio_input, save_audio
 
 
 _LOCK = threading.RLock()
@@ -135,8 +135,9 @@ class TrainingProject:
                                 "ffmpeg",
                                 "-v",
                                 "error",
-                                "-i",
-                                str(path),
+                                *local_audio_input(path),
+                                "-map",
+                                "0:a:0",
                                 "-t",
                                 "31",
                                 "-ac",
@@ -233,6 +234,7 @@ def import_ready_audio(project, audio_files, language, consent, backend, progres
     for audio_path in iterator:
         try:
             # FFmpeg-backed librosa also supports input formats not handled by libsndfile.
+            local_audio_input(audio_path)
             waveform, _ = backend.librosa.load(audio_path, sr=24000, mono=True)
             if len(waveform) / 24000 < 1:
                 raise ValueError("áudio com menos de 1 segundo")

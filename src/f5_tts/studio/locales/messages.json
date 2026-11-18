@@ -5258,5 +5258,13 @@
   ["Não foi possível analisar a referência com Gemini. Confira a chave, a cota e o modelo.", "Could not analyze the reference with Gemini. Check the key, quota, and model."],
   ["O Gemini não retornou uma análise completa da referência.", "Gemini did not return a complete reference analysis."],
   ["O modo offline está ativo. Desative-o para analisar áudio com Gemini.", "Offline mode is enabled. Turn it off to analyze audio with Gemini."],
-  ["O áudio está grande demais para análise. Selecione um trecho mais curto.", "The audio is too large to analyze. Select a shorter clip."]
+  ["O áudio está grande demais para análise. Selecione um trecho mais curto.", "The audio is too large to analyze. Select a shorter clip."],
+  ["Minhas referências", "My references"],
+  ["Referência favorita", "Favorite reference"],
+  ["Gravações e referências recentes", "Recent recordings and references"],
+  ["Nome para salvar a referência atual", "Name for the current reference"],
+  ["Salvar como favorita", "Save as favorite"],
+  ["Referência salva nas favoritas.", "Reference saved to favorites."],
+  ["O arquivo não contém um formato de áudio reconhecido.", "The file does not contain a recognized audio format."],
+  ["O arquivo excede o tamanho permitido.", "The file exceeds the allowed size."]
 ]

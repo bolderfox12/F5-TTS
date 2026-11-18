@@ -5,10 +5,10 @@ from importlib.resources import files
 import numpy as np
 import soundfile as sf
 import tqdm
-from cached_path import cached_path
 from hydra.utils import get_class
 from omegaconf import OmegaConf
 
+from f5_tts.checkpoint_io import download_hf_model_file
 from f5_tts.device_utils import get_default_device
 from f5_tts.infer.utils_infer import (
     infer_process,
@@ -75,7 +75,9 @@ class F5TTS:
 
         if not ckpt_file:
             ckpt_file = str(
-                cached_path(f"hf://SWivid/{repo_name}/{model}/model_{ckpt_step}.{ckpt_type}", cache_dir=hf_cache_dir)
+                download_hf_model_file(
+                    f"hf://SWivid/{repo_name}/{model}/model_{ckpt_step}.{ckpt_type}", cache_dir=hf_cache_dir
+                )
             )
         self.ema_model = load_model(
             model_cls, model_arc, ckpt_file, self.mel_spec_type, vocab_file, self.ode_method, self.use_ema, self.device

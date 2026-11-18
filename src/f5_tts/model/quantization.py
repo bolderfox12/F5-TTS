@@ -8,6 +8,8 @@ from safetensors.torch import load_file, save_file
 from torch.ao.nn.quantized.dynamic import Linear as DynamicLinear
 from torch.nn import Linear
 
+from f5_tts.checkpoint_io import load_checkpoint_weights
+
 
 FORMAT = "f5-studio-dynamic-int8-v1"
 SCALE_SUFFIX = ".studio_int8_scale"
@@ -27,7 +29,7 @@ def export_int8(source, destination):
     if Path(source).suffix.lower() == ".safetensors":
         state = load_file(source)
     else:
-        checkpoint = torch.load(source, map_location="cpu", weights_only=True)
+        checkpoint = load_checkpoint_weights(source, map_location="cpu")
         state = checkpoint.get("ema_model_state_dict", checkpoint.get("model_state_dict"))
         if state is None:
             raise ValueError("O checkpoint precisa conter pesos F5-TTS ou E2-TTS.")

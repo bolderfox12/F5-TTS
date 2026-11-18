@@ -7,9 +7,9 @@
 A local web studio for creating speech, saved voices, narrated stories, subtitles, and voice models.
 F5 Studio uses [F5-TTS](https://github.com/SWivid/F5-TTS) for speech synthesis and runs processing on your computer.
 
-**Version 1.3.5** adds a multilingual training workspace with BigVGAN, single- and multi-GPU CUDA
-training, live resource charts and progress, RAM caching, and INT8 CPU export.
-See the [complete guide in Brazilian Portuguese](docs/guia-studio.md), [release notes](docs/releases/v1.3.5.md),
+**Version 1.3.6** adds a persistent reference library, AI-assisted script and reference review,
+per-turn voice assignment, and security fixes.
+See the [complete guide in Brazilian Portuguese](docs/guia-studio.md), [release notes](docs/releases/v1.3.6.md),
 and [changelog](CHANGELOG.md).
 
 ## What you can do
@@ -135,6 +135,10 @@ you select it. Uploading an existing audio file remains available.
 Use `localhost` or `127.0.0.1` for microphone permission. Use clean speech without music.
 
 ## Prepare a reference and review a script
+
+**My references**, above the microphone in **Create audio**, lists recent recordings and references
+from this workspace. Select one to listen or reuse it. To keep a reference for routine use, give it
+a name and click **Save as favorite**. It also appears in **My voices**, with the transcript you entered.
 
 In **Create audio**, select a saved voice, record, or upload a reference. **Reference quality** checks
 duration, sample rate, recording level, and clipping, then suggests practical adjustments. Listen to
@@ -344,6 +348,17 @@ $env:TRANSFORMERS_OFFLINE="1"
 .\.venv\Scripts\f5-tts_studio.exe
 ```
 
+## Local security
+
+Studio accepts browser requests from its own loopback origin, with upload limits checked on the
+server. Gradio CLI access on a non-loopback interface or with a share link requires
+`F5_GRADIO_USERNAME` and `F5_GRADIO_PASSWORD`. The low-level socket server binds to loopback
+by default.
+
+Use PyTorch 2.10 or later, excluding the 2.14 series, for native PyTorch checkpoints. Use
+safetensors when exchanging model weights. Keep local workspaces and provider API keys private.
+The separate TensorRT deployment examples have their own runtime and dependency requirements.
+
 ## Troubleshooting
 
 | Symptom | Check |
@@ -360,11 +375,11 @@ $env:TRANSFORMERS_OFFLINE="1"
 ## Validation and development
 
 ```bash
-python -m pip install pytest
-python -m pytest tests -q -p no:cacheprovider
+python -m unittest discover -s tests -v
 ```
 
-Version 1.3.5 validation included **49 automated tests**, browser checks for batch import, review,
+Version 1.3.6 validation included **61 automated tests**, browser checks for reference persistence,
+and a real CUDA synthesis with F5-TTS. Version 1.3.5 validation included **49 automated tests**, browser checks for batch import, review,
 training controls, live resource charts, and INT8 download. Synthetic training verified distributed
 execution with two CPU processes, gradient accumulation, validation, and checkpointing.
 BigVGAN inference produced 24 kHz WAV audio on an RTX 3080 Ti. INT8 CPU inference reduced the

@@ -14,10 +14,11 @@ import gradio as gr
 import numpy as np
 import soundfile as sf
 import torch
-from cached_path import cached_path
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from f5_tts.audio import load_audio
+from f5_tts.checkpoint_io import download_hf_model_file
+from f5_tts.gradio_access import gradio_access
 
 
 try:
@@ -63,13 +64,13 @@ vocoder = load_vocoder()
 
 
 def load_f5tts():
-    ckpt_path = str(cached_path(DEFAULT_TTS_MODEL_CFG[0]))
+    ckpt_path = str(download_hf_model_file(DEFAULT_TTS_MODEL_CFG[0]))
     F5TTS_model_cfg = json.loads(DEFAULT_TTS_MODEL_CFG[2])
     return load_model(DiT, F5TTS_model_cfg, ckpt_path)
 
 
 def load_e2tts():
-    ckpt_path = str(cached_path("hf://SWivid/E2-TTS/E2TTS_Base/model_1200000.safetensors"))
+    ckpt_path = str(download_hf_model_file("hf://SWivid/E2-TTS/E2TTS_Base/model_1200000.safetensors"))
     E2TTS_model_cfg = dict(dim=1024, depth=24, heads=16, ff_mult=4, text_mask_padding=False, pe_attn_head=1)
     return load_model(UNetT, E2TTS_model_cfg, ckpt_path)
 
@@ -77,9 +78,9 @@ def load_e2tts():
 def load_custom(ckpt_path: str, vocab_path="", model_cfg=None):
     ckpt_path, vocab_path = ckpt_path.strip(), vocab_path.strip()
     if ckpt_path.startswith("hf://"):
-        ckpt_path = str(cached_path(ckpt_path))
+        ckpt_path = str(download_hf_model_file(ckpt_path))
     if vocab_path.startswith("hf://"):
-        vocab_path = str(cached_path(vocab_path))
+        vocab_path = str(download_hf_model_file(vocab_path))
     if model_cfg is None:
         model_cfg = json.loads(DEFAULT_TTS_MODEL_CFG[2])
     elif isinstance(model_cfg, str):
@@ -1120,9 +1121,11 @@ If you're having issues, try converting your reference audio to WAV or MP3, clip
 )
 def main(port, host, share, api, root_path, inbrowser):
     global app
+    host, auth = gradio_access(host, share)
     print("Starting app...")
     app.queue(api_open=api).launch(
         server_name=host,
+        auth=auth,
         server_port=port,
         share=share,
         root_path=root_path,

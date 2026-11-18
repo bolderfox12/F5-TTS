@@ -25,7 +25,8 @@ import torch
 from safetensors.torch import save_file
 from torch import nn
 
-from f5_tts.audio import load_audio, save_audio
+from f5_tts.audio import load_audio, local_audio_input, save_audio
+from f5_tts.checkpoint_io import download_hf_model_file, load_checkpoint_weights
 from f5_tts.model.dataset import load_dataset
 from f5_tts.model.quantization import export_int8, int8_engine, is_int8_checkpoint, load_int8
 from f5_tts.studio.service import StudioService
@@ -59,6 +60,49 @@ class StudioTests(unittest.TestCase):
         voice = self.service.save_voice("Minha voz", self.reference, "Hello world")
         reopened = StudioService(self.root / "studio", self.root / "data")
         self.assertEqual(reopened.read()["voices"][0]["id"], voice["id"])
+
+    def test_reference_library_survives_reload_and_keeps_saved_favorites(self):
+        recording = self.service.upload_path("microfone.wav")
+        shutil.copyfile(self.reference, recording)
+        self.service.remember_reference(self.reference)
+        self.service.generate("Example", self.reference, "The recorded words")
+        reopened = StudioService(self.service.home, self.service.data_root)
+        entries = {entry["path"]: entry for entry in reopened.recent_references()}
+        self.assertEqual(entries[str(recording)]["name"], "microfone.wav")
+        self.assertEqual(entries[str(self.reference)]["transcript"], "The recorded words")
+        favorite = reopened.save_voice("Favorite recording", recording, "Transcript")
+        self.assertIn(favorite, reopened.read()["voices"])
+        self.assertNotIn(str(recording), {entry["path"] for entry in reopened.recent_references()})
+
+    def test_restricted_checkpoint_loader_requires_patched_pytorch(self):
+        with patch("torch.load") as load:
+            for version in ("2.8.0", "2.9.1", "2.14.1"):
+                with self.subTest(version=version), patch("torch.__version__", version):
+                    with self.assertRaisesRegex(RuntimeError, "PyTorch 2.10"):
+                        load_checkpoint_weights("unused.pt")
+            load.assert_not_called()
+            with patch("torch.__version__", "2.11.0+cu128"):
+                load_checkpoint_weights("trusted.pt")
+            load.assert_called_once_with("trusted.pt", map_location="cpu", weights_only=True)
+
+    def test_checkpoint_downloads_resolve_only_documented_hub_urls(self):
+        with patch("f5_tts.checkpoint_io.hf_hub_download", return_value="cached.safetensors") as download:
+            self.assertEqual(
+                download_hf_model_file("hf://SWivid/F5-TTS@main/path/model.safetensors"), "cached.safetensors"
+            )
+            download.assert_called_once_with(
+                repo_id="SWivid/F5-TTS", filename="path/model.safetensors", revision="main", cache_dir=None
+            )
+            with self.assertRaises(ValueError):
+                download_hf_model_file("https://example.invalid/model.safetensors")
+
+    def test_audio_decoder_accepts_only_supported_containers(self):
+        args = local_audio_input(self.reference)
+        self.assertEqual(args, ["-protocol_whitelist", "file,pipe", "-f", "wav", "-i", str(self.reference)])
+        invalid = self.service.upload_path("invalid.wav")
+        invalid.write_bytes(b"This file is not audio")
+        with self.assertRaisesRegex(ValueError, "formato de áudio"):
+            local_audio_input(invalid)
 
     def test_generation_uses_settings_and_history_survives(self):
         voice = self.service.save_voice("Narrador", self.reference, "Hello world")
@@ -387,6 +431,37 @@ class StudioTests(unittest.TestCase):
         self.assertIsNone(backend.training_process)
         self.assertEqual(self.service.job["progress"], (2, 8, 1, 4))
         self.assertFalse(self.service._operation.locked())
+
+
+@unittest.skipUnless(importlib.util.find_spec("nicegui"), "Install .[studio] to exercise NiceGUI boundaries")
+class StudioBrowserBoundaryTests(unittest.TestCase):
+    def test_origin_and_host_gate_http_and_websocket(self):
+        from starlette.applications import Starlette
+        from starlette.responses import PlainTextResponse
+        from starlette.routing import Route, WebSocketRoute
+        from starlette.testclient import TestClient
+        from starlette.websockets import WebSocketDisconnect
+
+        from f5_tts.studio.http_security import StudioBrowserBoundary
+
+        async def view(request):
+            return PlainTextResponse("ok")
+
+        async def socket(websocket):
+            await websocket.accept()
+            await websocket.close()
+
+        boundary = StudioBrowserBoundary(Starlette(routes=[Route("/", view), WebSocketRoute("/ws", socket)]))
+        with TestClient(boundary, base_url="http://127.0.0.1:7862") as client:
+            origin = "http://127.0.0.1:7862"
+            self.assertEqual(client.get("/", headers={"Origin": origin}).status_code, 200)
+            self.assertEqual(client.get("/", headers={"Host": "example.invalid"}).status_code, 400)
+            self.assertEqual(client.get("/", headers={"Origin": "http://example.invalid"}).status_code, 403)
+            with self.assertRaises(WebSocketDisconnect):
+                with client.websocket_connect("ws://127.0.0.1:7862/ws", headers={"Origin": "http://example.invalid"}):
+                    self.fail("The WebSocket should have been rejected")
+            with client.websocket_connect("ws://127.0.0.1:7862/ws", headers={"Origin": origin}):
+                pass
 
 
 @unittest.skipUnless(importlib.util.find_spec("nicegui"), "Install .[studio] to exercise NiceGUI routes")
