@@ -124,17 +124,28 @@ def load_vocoder(vocoder_name="vocos", is_local=False, local_path="", device=dev
     elif vocoder_name == "bigvgan":
         try:
             from third_party.BigVGAN import bigvgan
-        except ImportError:
-            print("You need to follow the README to init submodule and change the BigVGAN source code.")
+        except ImportError as error:
+            raise RuntimeError(
+                "BigVGAN indisponível. Execute git submodule update --init -- src/third_party/BigVGAN."
+            ) from error
+        repo_id = "nvidia/bigvgan_v2_24khz_100band_256x"
         if is_local:
-            # download generator from https://huggingface.co/nvidia/bigvgan_v2_24khz_100band_256x/tree/main
-            vocoder = bigvgan.BigVGAN.from_pretrained(local_path, use_cuda_kernel=False)
+            config_path = os.path.join(local_path, "config.json")
+            weights_path = os.path.join(local_path, "bigvgan_generator.pt")
         else:
-            vocoder = bigvgan.BigVGAN.from_pretrained(
-                "nvidia/bigvgan_v2_24khz_100band_256x", use_cuda_kernel=False, cache_dir=hf_cache_dir
-            )
-
-        vocoder.remove_weight_norm()
+            config_path = hf_hub_download(repo_id=repo_id, filename="config.json", cache_dir=hf_cache_dir)
+            weights_path = hf_hub_download(repo_id=repo_id, filename="bigvgan_generator.pt", cache_dir=hf_cache_dir)
+        config = bigvgan.load_hparams_from_json(config_path)
+        if (config.sampling_rate, config.num_mels, config.hop_size) != (24000, 100, 256):
+            raise ValueError("O vocoder BigVGAN precisa usar 24 kHz, 100 bandas mel e hop de 256 amostras.")
+        vocoder = bigvgan.BigVGAN(config, use_cuda_kernel=False)
+        weights = torch.load(weights_path, map_location="cpu", weights_only=True)["generator"]
+        if not any(key.endswith(".weight_g") for key in weights):
+            vocoder.remove_weight_norm()
+            vocoder.load_state_dict(weights)
+        else:
+            vocoder.load_state_dict(weights)
+            vocoder.remove_weight_norm()
         vocoder = vocoder.eval().to(device)
     return vocoder
 
@@ -182,6 +193,10 @@ def transcribe(ref_audio, language=None):
 
 
 def load_checkpoint(model, ckpt_path, device: str, dtype=None, use_ema=True):
+    from f5_tts.model.quantization import is_int8_checkpoint, load_int8
+
+    if is_int8_checkpoint(ckpt_path):
+        return load_int8(model.cpu().float(), ckpt_path)
     if dtype is None:
         dtype = (
             torch.float16
@@ -247,6 +262,10 @@ def load_model(
     print("token : ", tokenizer)
     print("model : ", ckpt_path, "\n")
 
+    from f5_tts.model.quantization import is_int8_checkpoint
+
+    if is_int8_checkpoint(ckpt_path):
+        device = "cpu"
     vocab_char_map, vocab_size = get_tokenizer(vocab_file, tokenizer)
     model = CFM(
         transformer=model_cls(**model_cfg, text_num_embeds=vocab_size, mel_dim=n_mel_channels),

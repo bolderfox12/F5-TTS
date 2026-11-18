@@ -185,9 +185,7 @@ class LocalTools:
             "speed": settings["speed"],
         }
         if block.get("model_project"):
-            project = self.project(block["model_project"])
-            options = project.read().get("training_options", {})
-            vocabulary = options.get("vocabulary") or str(project.path / "vocab.txt")
+            vocabulary = self.project_vocabulary(block["model_project"])
             payload["vocabulary_version"] = self.model_version(vocabulary)
         if block.get("model_id", "original") != "original":
             model = next((m for m in data.get("models", []) if m["id"] == block["model_id"]), None)

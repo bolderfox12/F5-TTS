@@ -7,7 +7,9 @@
 A local web studio for creating speech, saved voices, narrated stories, subtitles, and voice models.
 F5 Studio uses [F5-TTS](https://github.com/SWivid/F5-TTS) for speech synthesis and runs processing on your computer.
 
-**Version 1.3.4:** live generation progress from the F5 inference steps, with CPU, GPU/VRAM, RAM, and disk activity monitoring. See the [release notes](docs/releases/v1.3.4.md)
+**Version 1.3.5** adds a multilingual training workspace with BigVGAN, single- and multi-GPU CUDA
+training, live resource charts and progress, RAM caching, and INT8 CPU export.
+See the [complete guide in Brazilian Portuguese](docs/guia-studio.md), [release notes](docs/releases/v1.3.5.md),
 and [changelog](CHANGELOG.md).
 
 ## What you can do
@@ -16,14 +18,14 @@ and [changelog](CHANGELOG.md).
 | --- | --- |
 | Create audio | Record or upload a reference, select a voice and model, then export WAV or MP3 with quality, denoising, and stereo options. Track inference progress and live CPU, GPU/VRAM, RAM, and disk usage. |
 | My voices | Keep named reference recordings and transcripts for reuse. |
-| My models | Inspect model files and disk usage, register checkpoints, and remove managed weights when they are no longer needed. |
+| My models | Inspect model files and disk usage, register checkpoints, export INT8 copies, and remove unused managed weights. |
 | Audio library | Find and filter generated audio and voice references; preview waveforms, trim audio into a new WAV, save clips as voices, copy, move, download, or delete files. |
 | Stories and characters | Build a cast, assign each character a voice and model, write dialogue, and export the complete story. |
 | Narration projects | Work with paragraph-based narration, voice assignments, segment edits, pauses, and WAV/SRT export. |
 | Transcription and subtitles | Transcribe locally, correct segments, translate subtitles, and export TXT/SRT. |
 | Revoice | Create a new narration from revised or translated text with the chosen voice and model. |
 | Audio tools | Convert WAV/MP3, adjust volume, reduce steady noise, and trim silence with FFmpeg, with in-page explanations for each effect. |
-| Train a voice | Review recordings, tune GPU training, upload a starting checkpoint, compare saved versions, and publish a selected checkpoint for inference. |
+| Train a voice | Import and review multilingual examples, train with one or more CUDA GPUs, monitor progress and resource usage, compare checkpoints, and publish or quantize models. |
 | History | Replay and download generated audio, with its model and generation settings. |
 | Settings | Choose CPU/CUDA, speed, generation steps, pronunciation rules, and cache preferences. |
 
@@ -214,32 +216,48 @@ it. A voice reference cannot be deleted while an existing story or narration use
 
 ## Train and compare voice checkpoints
 
-Open **Train a voice** and create a project or continue an existing one. The page is organized into
-four areas: **Data and transcripts**, **Training and GPU**, **Evaluate checkpoints**, and **Use for
-inference**.
+Open **Train a voice** to create or resume a project. Use an editable checkout for advanced
+training and BigVGAN so the project can use the base vocabulary and the NVIDIA submodule.
+See the [full training and troubleshooting guide](docs/guia-studio.md#treinamento-de-voz).
 
-1. Import recordings from one speaker, review the transcripts, and approve only examples that are
-   clean and correctly transcribed. Training uses the approved real recordings; generated samples
-   are not automatically added to the training set.
-2. Optionally upload a compatible F5 checkpoint and its vocabulary to start from those weights.
-   If no starting checkpoint is provided, the first run uses the F5 base weights and may download
-   about 1.4 GB if they are not already cached.
-3. The GPU panel reports VRAM, current memory use, and—when `nvidia-smi` is available—GPU load,
-   temperature, and power. **Optimize for this GPU** sets a conservative frame batch, mixed
-   precision, and an 8-bit optimizer profile. Advanced controls include batch frames, examples per
-   batch, gradient accumulation and clipping, CPU data-loader workers, learning rate, epochs,
-   warmup, and checkpoint retention. Reduce the frame batch if training runs out of VRAM.
-4. Refresh the checkpoint list and select one or several versions. The comparison uses the same
-   voice reference and text for each selected checkpoint. Listen and rate each result; a good result
-   can be saved as a reusable voice reference.
-5. In **Use for inference**, register the selected checkpoint in **My models**. The checkpoint and
-   its matching vocabulary stay in their training locations; the app adds a library entry without
-   copying the weights.
+1. **Data and transcripts.** Upload multiple recordings. Studio can transcribe and segment recordings
+   with Whisper, or read a pasted manifest with one `filename.wav|transcript` per short file.
+   Review each clip, check its RMS level and clipping, and approve it for training. Enable vocabulary
+   expansion to add tokens from approved transcripts while retaining the original token IDs.
+2. **Training and GPU.** Select the architecture and an optional compatible starting checkpoint and
+   vocabulary. The initial download for a public base checkpoint is around 1.4 GB. Use the suggested
+   GPU profile or configure BF16/FP16, frame budget, accumulation, clipping, workers, warmup,
+   8-bit Adam, activation recomputation (F5-TTS), TF32 (Ampere and newer), and checkpoint retention.
+   The optional validation percentage reserves approved clips before training. Each epoch reports
+   EMA loss on up to 24 of the reserved clips. Use different recordings and review their transcripts
+   before reserving a validation split.
+   Use **Multiple CUDA GPUs** to distribute training over all visible GPUs. Leave it off for one
+   GPU. Resume with the same number of GPUs. The optional **RAM spectrogram cache** reuses computed
+   features and divides the configured GiB budget across processes. Actual cache allocation is
+   capped by available host memory. The resource monitor charts CPU, RAM, disk occupancy and
+   throughput, GPU utilization, and VRAM. Training progress reports completed and planned updates.
+3. **Evaluate checkpoints.** Select checkpoints, a reference clip, and a fixed phrase to generate
+   comparable samples. Try phrases that cover the target language's sounds and writing system.
+4. **Use for inference.** Register a checkpoint and its training vocabulary in **My models**.
+5. **Quantization.** Export a checkpoint's linear layers as INT8 for CPU inference. You can also create
+   an INT8 copy from **My models**. The Studio reports both file sizes. To transfer a custom model,
+   download its INT8 weights and vocabulary from the library and register them on the other machine
+   with the same architecture. This format needs an x86 PyTorch quantized backend and preserves the
+   vocoder in its original precision.
 
-Training settings and starting weights are locked to a project's first training run. Create another
-project to experiment with a different architecture or base checkpoint. The Studio does not switch
-the active inference model automatically after training.
-A saved voice is a reference recording; a model contains the trained weights.
+Use a fresh project to change base architecture, adjust the vocabulary after training, or fine-tune
+a prior checkpoint with different data. Resuming an existing run uses its saved optimizer and data
+order. The default model stays selectable alongside project checkpoints.
+
+For **F5-TTS Base · BigVGAN**, initialize the NVIDIA submodule once:
+
+```bash
+git submodule update --init -- src/third_party/BigVGAN
+```
+
+This option uses the compatible SWivid acoustic checkpoint and NVIDIA BigVGAN v2 at 24 kHz with
+100 mel bands. The vocoder is downloaded on first synthesis or when generating training previews.
+Studio fine-tunes the acoustic model and uses BigVGAN's pretrained generator for waveform synthesis.
 
 ## Subtitles, audio tools, and training
 
@@ -291,9 +309,12 @@ python -m pip install pytest
 python -m pytest tests -q -p no:cacheprovider
 ```
 
-Validation: **47 tests passed**, plus browser checks in all seven languages using a temporary
-workspace and simulated synthesis. The suite covers character parsing, separate references and models, cache invalidation and reuse,
-WAV/SRT output, workspace compatibility, all interface catalogs and placeholders, and Studio pages.
+Version 1.3.5 validation included **49 automated tests**, browser checks for batch import, review,
+training controls, live resource charts, and INT8 download. Synthetic training verified distributed
+execution with two CPU processes, gradient accumulation, validation, and checkpointing.
+BigVGAN inference produced 24 kHz WAV audio on an RTX 3080 Ti. INT8 CPU inference reduced the
+public F5-TTS v1 Base checkpoint from about **1.35 GB to 355 MB** in that test. The machine had
+one physical CUDA GPU, so the tests did not measure multi-GPU CUDA performance.
 The HTTP startup timeout is configurable through `F5_STUDIO_TEST_STARTUP_TIMEOUT` (default: 120 seconds).
 
 For the opt-in browser test with a temporary workspace and simulated synthesis:

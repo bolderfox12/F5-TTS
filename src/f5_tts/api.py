@@ -19,6 +19,7 @@ from f5_tts.infer.utils_infer import (
     save_spectrogram,
     transcribe,
 )
+from f5_tts.model.quantization import is_int8_checkpoint
 from f5_tts.model.utils import seed_everything
 
 
@@ -34,17 +35,20 @@ class F5TTS:
         device=None,
         hf_cache_dir=None,
     ):
-        model_cfg = OmegaConf.load(str(files("f5_tts").joinpath(f"configs/{model}.yaml")))
+        config_name = "F5TTS_Base" if model == "F5TTS_Base_bigvgan" else model
+        model_cfg = OmegaConf.load(str(files("f5_tts").joinpath(f"configs/{config_name}.yaml")))
         model_cls = get_class(f"f5_tts.model.{model_cfg.model.backbone}")
         model_arc = model_cfg.model.arch
 
-        self.mel_spec_type = model_cfg.model.mel_spec.mel_spec_type
+        self.mel_spec_type = "bigvgan" if model == "F5TTS_Base_bigvgan" else model_cfg.model.mel_spec.mel_spec_type
         self.target_sample_rate = model_cfg.model.mel_spec.target_sample_rate
 
         self.ode_method = ode_method
         self.use_ema = use_ema
 
-        if device is not None:
+        if is_int8_checkpoint(ckpt_file):
+            self.device = "cpu"
+        elif device is not None:
             self.device = device
         else:
             self.device = get_default_device()
@@ -63,6 +67,8 @@ class F5TTS:
             elif self.mel_spec_type == "bigvgan":
                 model = "F5TTS_Base_bigvgan"
                 ckpt_type = "pt"
+        elif model == "F5TTS_Base_bigvgan":
+            ckpt_type = "pt"
         elif model == "E2TTS_Base":
             repo_name = "E2-TTS"
             ckpt_step = 1200000

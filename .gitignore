@@ -6,6 +6,8 @@ data/
 ckpts/
 wandb/
 results/
+/.studio/
+/validacao-modelo-real.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

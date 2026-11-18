@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections import deque
 from datetime import datetime, timezone
 from importlib.resources import files
 from pathlib import Path, PureWindowsPath
@@ -21,7 +22,8 @@ import torch
 from f5_tts.studio.i18n import INTERFACE_LANGUAGES, translate
 from f5_tts.studio.local_tools import LocalTools
 from f5_tts.studio.story_tools import StoryTools
-from f5_tts.train.guided_training import TrainingProject, import_ready_audio
+from f5_tts.train.guided_training import TrainingProject, import_ready_audio, training_upload_name
+from f5_tts.train.studio_dataset import prepare_dataset, vocabulary_digest
 
 
 class _InferenceProgress:
@@ -38,7 +40,7 @@ class _InferenceProgress:
             fraction = sum(self.fractions) / batch_count
             completed = sum(value >= 1 for value in self.fractions)
         percent = 8 + 82 * fraction
-        self.callback(percent, f"Inferindo · {completed}/{batch_count} trechos")
+        self.callback(True, percent, f"Inferindo · {completed}/{batch_count} trechos")
 
 
 class StudioService(StoryTools, LocalTools):
@@ -120,8 +122,7 @@ class StudioService(StoryTools, LocalTools):
         suffix = Path(filename).suffix.lower()
         if suffix not in (".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"):
             raise ValueError("Escolha um arquivo WAV, MP3, FLAC, OGG, M4A ou AAC.")
-        stem = "".join(c if c.isalnum() or c in "-_." else "_" for c in Path(filename).stem)[:60]
-        return self.uploads / (uuid4().hex + "-" + stem + suffix)
+        return self.uploads / (uuid4().hex + "-" + training_upload_name(filename))
 
     def microphone_reference(self, encoded):
         """Convert a short browser recording to a managed, validated PCM WAV."""
@@ -291,13 +292,76 @@ class StudioService(StoryTools, LocalTools):
         with self._generation_lock:
             return dict(self._generation_status)
 
-    def system_metrics(self):
-        """Capture host and accelerator usage while an audio job is active."""
+    def training_gpus(self):
+        devices = []
+        smi_rows = []
+        try:
+            query = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=uuid,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=True,
+            )
+            smi_rows = [line.strip().split(",") for line in query.stdout.splitlines()]
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+        count = torch.cuda.device_count() if torch.cuda.is_available() else 0
+        by_uuid = {row[0].strip().lower().removeprefix("gpu-"): row[1:] for row in smi_rows if len(row) == 6}
+        for index in range(count):
+            properties = torch.cuda.get_device_properties(index)
+            memory = properties.total_memory
+            utilization = temperature = power = used = None
+            match = by_uuid.get(str(getattr(properties, "uuid", "")).lower().removeprefix("gpu-"))
+            if match:
+                try:
+                    utilization = float(match[0])
+                except ValueError:
+                    pass
+                try:
+                    used = float(match[1]) * 1024**2
+                    memory = float(match[2]) * 1024**2
+                except ValueError:
+                    pass
+                try:
+                    temperature = float(match[3])
+                except ValueError:
+                    pass
+                try:
+                    power = float(match[4])
+                except ValueError:
+                    pass
+            if used is None:
+                try:
+                    free, memory = torch.cuda.mem_get_info(index)
+                    used = memory - free
+                except RuntimeError:
+                    pass
+            devices.append(
+                {
+                    "index": index,
+                    "name": properties.name,
+                    "utilization": utilization,
+                    "temperature": temperature,
+                    "power": power,
+                    "used_gib": used / 1024**3 if used is not None else None,
+                    "total_gib": memory / 1024**3,
+                }
+            )
+        return devices
+
+    def system_metrics(self, include_training_gpus=False):
+        """Capture host and accelerator usage for the Studio dashboards."""
         import psutil
 
         cpu = psutil.cpu_percent(interval=0.05)
         memory = psutil.virtual_memory()
-        disk = shutil.disk_usage(self.home)
+        disk = shutil.disk_usage(self.data_root if include_training_gpus else self.home)
         counters = psutil.disk_io_counters()
         read_mbps = write_mbps = 0.0
         now = time.monotonic()
@@ -309,8 +373,10 @@ class StudioService(StoryTools, LocalTools):
                     read_mbps = max(0, counters.read_bytes - previous[1]) / elapsed / (1024**2)
                     write_mbps = max(0, counters.write_bytes - previous[2]) / elapsed / (1024**2)
                 self._previous_disk_io = (now, counters.read_bytes, counters.write_bytes)
-        hardware = self.training_hardware()
+        gpus = self.training_gpus() if include_training_gpus else []
+        primary = gpus[0] if gpus else {"name": "CPU"} if include_training_gpus else self.training_hardware()
         return {
+            "gpus": gpus,
             "cpu_percent": cpu,
             "ram_used_gb": (memory.total - memory.available) / (1024**3),
             "ram_total_gb": memory.total / (1024**3),
@@ -319,15 +385,19 @@ class StudioService(StoryTools, LocalTools):
             "disk_free_gb": disk.free / (1024**3),
             "disk_read_mbps": read_mbps,
             "disk_write_mbps": write_mbps,
-            "gpu_name": hardware["name"],
-            "gpu_percent": hardware.get("utilization"),
-            "gpu_vram_used_gb": hardware.get("allocated", 0),
-            "gpu_vram_total_gb": hardware.get("memory", 0),
+            "gpu_name": primary["name"],
+            "gpu_percent": primary.get("utilization"),
+            "gpu_vram_used_gb": primary.get("used_gib", primary.get("allocated", 0)),
+            "gpu_vram_total_gb": primary.get("total_gib", primary.get("memory", 0)),
         }
 
     def checkpoints(self, project):
         p = self.project(project)
-        return self.backend().get_checkpoints_project(p.name, False)[0]
+        return [
+            path
+            for path in self.backend().get_checkpoints_project(p.name, False)[0]
+            if not Path(path).name.startswith("pretrained_")
+        ]
 
     def models(self):
         return [
@@ -517,14 +587,18 @@ class StudioService(StoryTools, LocalTools):
         finally:
             self._operation.release()
 
-    def register_model(self, name, checkpoint, vocabulary="", architecture="F5TTS_v1_Base"):
+    def register_model(self, name, checkpoint, vocabulary="", architecture="F5TTS_v1_Base", *, quantized=False):
         name = (name or "").strip()
         if not name or len(name) > 100:
             raise ValueError("Dê ao modelo um nome de até 100 caracteres.")
-        if architecture not in ("F5TTS_v1_Base", "F5TTS_Base", "E2TTS_Base"):
+        if architecture not in ("F5TTS_v1_Base", "F5TTS_Base", "F5TTS_Base_bigvgan", "E2TTS_Base"):
             raise ValueError("Escolha a mesma arquitetura usada no treinamento.")
         checkpoint = self.local_model_file(checkpoint, (".pt", ".pth", ".ckpt", ".safetensors"))
         vocabulary = self.local_model_file(vocabulary, (".txt",)) if vocabulary else ""
+        if not quantized and Path(checkpoint).suffix.lower() == ".safetensors":
+            from f5_tts.model.quantization import is_int8_checkpoint
+
+            quantized = is_int8_checkpoint(checkpoint)
         with self._storage:
             if any(model["name"].casefold() == name.casefold() for model in self.models()):
                 raise ValueError("Já existe um modelo com esse nome.")
@@ -536,9 +610,63 @@ class StudioService(StoryTools, LocalTools):
                 "vocabulary": vocabulary,
                 "architecture": architecture,
             }
+            if quantized:
+                model["quantized"] = True
             data.setdefault("models", []).append(model)
             self.write(data)
         return model
+
+    def quantize_model(self, model_id, name, project="", checkpoint=""):
+        from f5_tts.model.quantization import export_int8
+
+        name = (name or "").strip()
+        if not name or len(name) > 100:
+            raise ValueError("Dê ao modelo um nome de até 100 caracteres.")
+        if not self._operation.acquire(blocking=False):
+            raise ValueError("Aguarde a operação em execução antes de quantizar.")
+        try:
+            if any(item["name"].casefold() == name.casefold() for item in self.models()):
+                raise ValueError("Já existe um modelo com esse nome.")
+            if project:
+                checkpoint = str(Path(checkpoint).resolve())
+                if checkpoint not in {str(Path(path).resolve()) for path in self.checkpoints(project)}:
+                    raise ValueError("Selecione um checkpoint deste projeto.")
+                architecture = self.training_options(project)["architecture"]
+                vocabulary = self.project_vocabulary(project)
+            else:
+                model = next((item for item in self.models() if item["id"] == model_id), None)
+                if model is None:
+                    raise ValueError("Escolha um modelo cadastrado.")
+                checkpoint, vocabulary, architecture = (model["checkpoint"], model["vocabulary"], model["architecture"])
+                if model_id == "original":
+                    from cached_path import cached_path
+
+                    checkpoint = cached_path("hf://SWivid/F5-TTS/F5TTS_v1_Base/model_1250000.safetensors")
+
+            self._model, self._model_key = None, None
+            gc.collect()
+            target = self.model_upload_path("modelo.safetensors")
+            copied_vocab = target.with_suffix(".txt") if vocabulary else None
+            with tempfile.TemporaryDirectory(dir=target.parent) as folder:
+                temporary = Path(folder) / target.name
+                export_int8(checkpoint, temporary)
+                source_size, size = Path(checkpoint).stat().st_size, temporary.stat().st_size
+                with self._storage:
+                    try:
+                        temporary.replace(target)
+                        if copied_vocab:
+                            shutil.copyfile(vocabulary, copied_vocab)
+                        result = self.register_model(
+                            name, str(target), str(copied_vocab or ""), architecture, quantized=True
+                        )
+                    except Exception:
+                        target.unlink(missing_ok=True)
+                        if copied_vocab:
+                            copied_vocab.unlink(missing_ok=True)
+                        raise
+            return {**result, "source_size": source_size, "size": size}
+        finally:
+            self._operation.release()
 
     def generate(
         self,
@@ -578,7 +706,7 @@ class StudioService(StoryTools, LocalTools):
                 if checkpoint not in self.checkpoints(project):
                     raise ValueError("Selecione um checkpoint do projeto.")
                 training_options = self.training_options(project)
-                vocabulary = training_options["vocabulary"] or str(self.project(project).path / "vocab.txt")
+                vocabulary = self.project_vocabulary(project)
                 architecture = training_options["architecture"]
                 model_name = project
             elif checkpoint:
@@ -998,13 +1126,16 @@ class StudioService(StoryTools, LocalTools):
         finally:
             self._operation.release()
 
-    def import_audio(self, name, paths, language, consent):
+    def import_audio(self, name, paths, language, consent, transcripts=""):
         if not self._operation.acquire(blocking=False):
             raise ValueError("Aguarde a operação em execução antes de importar.")
         try:
             for path in paths:
                 self.managed_upload(path)
-            return import_ready_audio(self.project(name), paths, language, consent, self.backend())
+            project = self.project(name)
+            if transcripts.strip():
+                return project.import_transcripts(paths, transcripts, consent)
+            return import_ready_audio(project, paths, language, consent, self.backend())
         finally:
             self._operation.release()
 
@@ -1019,22 +1150,31 @@ class StudioService(StoryTools, LocalTools):
             for row in rows:
                 if row[0] == identifier:
                     row[1], row[2] = bool(approved), text
-            p.review(rows)
+            return p.review(rows)
         finally:
             self._operation.release()
 
-    def prepare(self, name):
+    def prepare(self, name, base_vocabulary="", extend=True):
         if not self._operation.acquire(blocking=False):
             raise ValueError("Aguarde a operação em execução antes de preparar.")
         try:
-            p = self.project(name)
-            # Reuse the exact preparation workflow already tested in the guided UI.
-            backend = self.backend()
-            callbacks = {block.fn.__name__: block.fn for block in backend.app.fns.values() if block.fn}
-            callbacks["prepare"](p.name)
-            return p.summary()
+            project = self.project(name)
+            base_vocab = self.training_base_vocabulary(base_vocabulary)
+            return prepare_dataset(project, base_vocab, extend, bool(self.checkpoints(name)))
         finally:
             self._operation.release()
+
+    def training_base_vocabulary(self, path):
+        if path:
+            return self.local_model_file(path, (".txt",))
+        return files("f5_tts").joinpath("../../data/Emilia_ZH_EN_pinyin/vocab.txt")
+
+    def project_vocabulary(self, name):
+        project = self.project(name)
+        options = self.training_options(name)
+        if project.read().get("prepared_vocabulary"):
+            return str(project.path / "vocab.txt")
+        return options["vocabulary"] or str(project.path / "vocab.txt")
 
     def training_options(self, name):
         project = self.project(name)
@@ -1061,6 +1201,13 @@ class StudioService(StoryTools, LocalTools):
             "keep_checkpoints": 5,
             "precision": "bf16" if supports_bf16 else "fp16",
             "use_8bit_optimizer": False,
+            "activation_checkpointing": False,
+            "tf32": False,
+            "log_samples": False,
+            "seed": 666,
+            "validation_percent": 0,
+            "multi_gpu": False,
+            "ram_cache_gib": 0.0,
             "base_checkpoint": "",
             "vocabulary": "",
         }
@@ -1082,13 +1229,23 @@ class StudioService(StoryTools, LocalTools):
             "num_workers": 8,
             "precision": "bf16" if torch.cuda.is_bf16_supported() else "fp16",
             "use_8bit_optimizer": info["memory"] <= 16,
+            "activation_checkpointing": info["memory"] <= 16,
+            "tf32": torch.cuda.get_device_capability()[0] >= 8,
             "hardware": info,
         }
 
     def save_training_options(self, name, options):
+        if not self._operation.acquire(blocking=False):
+            raise ValueError("Aguarde a operação em execução para salvar as opções.")
+        try:
+            return self._save_training_options(name, options)
+        finally:
+            self._operation.release()
+
+    def _save_training_options(self, name, options):
         current = self.training_options(name)
         merged = {**current, **options}
-        architectures = ("F5TTS_v1_Base", "F5TTS_Base", "E2TTS_Base")
+        architectures = ("F5TTS_v1_Base", "F5TTS_Base", "F5TTS_Base_bigvgan", "E2TTS_Base")
         if merged["architecture"] not in architectures:
             raise ValueError("Escolha uma arquitetura F5-TTS válida.")
         if not 1e-7 <= float(merged["learning_rate"]) <= 1e-3:
@@ -1107,6 +1264,16 @@ class StudioService(StoryTools, LocalTools):
             raise ValueError("Escolha fp16, bf16 ou sem precisão mista.")
         if merged["precision"] == "bf16" and torch.cuda.is_available() and not torch.cuda.is_bf16_supported():
             raise ValueError("Esta GPU não oferece suporte a BF16. Escolha FP16.")
+        if merged["activation_checkpointing"] and merged["architecture"] == "E2TTS_Base":
+            raise ValueError("O checkpoint de ativações está disponível nas arquiteturas F5-TTS.")
+        ram_cache = float(merged["ram_cache_gib"])
+        if not 0 <= ram_cache <= 1024:
+            raise ValueError("O limite de cache deve ficar entre 0 e 1024 GiB.")
+        merged["ram_cache_gib"] = ram_cache
+        if not 0 <= int(merged["validation_percent"]) <= 30:
+            raise ValueError("Reserve de 0 a 30% dos exemplos para validação.")
+        if not 0 <= int(merged["seed"]) <= 2**32 - 1:
+            raise ValueError("Use uma semente entre 0 e 4294967295.")
         merged["learning_rate"] = float(merged["learning_rate"])
         merged["max_grad_norm"] = float(merged["max_grad_norm"])
         for field in (
@@ -1118,16 +1285,25 @@ class StudioService(StoryTools, LocalTools):
             "save_every",
             "keep_checkpoints",
             "num_workers",
+            "seed",
+            "validation_percent",
         ):
             merged[field] = int(merged[field])
         if merged["base_checkpoint"]:
+            from f5_tts.model.quantization import is_int8_checkpoint
+
             merged["base_checkpoint"] = self.local_model_file(
                 merged["base_checkpoint"], (".pt", ".pth", ".ckpt", ".safetensors")
             )
+            if is_int8_checkpoint(merged["base_checkpoint"]):
+                raise ValueError("Use um checkpoint de treino em precisão normal como modelo inicial.")
         if merged["vocabulary"]:
             merged["vocabulary"] = self.local_model_file(merged["vocabulary"], (".txt",))
         project = self.project(name)
         data = project.read()
+        origin = data.get("training_origin", {})
+        if any(merged[field] != value for field, value in origin.items()):
+            raise ValueError("A arquitetura e o checkpoint inicial pertencem ao histórico deste projeto.")
         data["training_options"] = merged
         project.write(data)
         return merged
@@ -1141,45 +1317,101 @@ class StudioService(StoryTools, LocalTools):
         options = self.training_options(project.name)
         if architecture != options["architecture"]:
             raise ValueError("Use a arquitetura que foi selecionada para este projeto de treinamento.")
-        vocabulary = options["vocabulary"] or str(project.path / "vocab.txt")
+        vocabulary = self.project_vocabulary(project.name)
         return self.register_model(name, checkpoint, vocabulary if Path(vocabulary).exists() else "", architecture)
 
     def start_training(self, name, options=None):
-        project = self.project(name)
-        previous_data = project.read()
-        if options is None:
-            options = self.training_options(name)
-        elif isinstance(options, int):
-            epochs = options
-            options = self.training_options(name)
-            options["epochs"] = epochs
-            options = self.save_training_options(name, options)
-        else:
-            options = self.save_training_options(name, options)
-        origin = {"architecture": options["architecture"], "base_checkpoint": options["base_checkpoint"]}
-        if previous_data.get("training_origin") and previous_data["training_origin"] != origin:
-            current_data = project.read()
-            if "training_options" in previous_data:
-                current_data["training_options"] = previous_data["training_options"]
-            else:
-                current_data.pop("training_options", None)
-            project.write(current_data)
-            raise ValueError(
-                "Este projeto já tem checkpoints de outra arquitetura ou modelo inicial. Crie outro projeto para iniciar uma linha de treino diferente."
-            )
-        p = project
+        if not self._operation.acquire(blocking=False):
+            raise ValueError("Já existe uma operação em execução.")
+        try:
+            return self._start_training(name, options)
+        except BaseException:
+            self._operation.release()
+            raise
+
+    def _start_training(self, name, options):
+        p = self.project(name)
         data = p.read()
         if data.get("prepared") != p.fingerprint() or not (p.path / "raw.arrow").exists():
             raise ValueError("Revise e prepare os exemplos antes de treinar.")
         if not torch.cuda.is_available():
             raise ValueError("O treinamento guiado requer GPU NVIDIA/CUDA. A preparação funciona em CPU.")
-        if not self._operation.acquire(blocking=False):
-            raise ValueError("Já existe uma operação em execução.")
+        if options is None:
+            options = self.training_options(name)
+        else:
+            options = self._save_training_options(name, {"epochs": options} if isinstance(options, int) else options)
+        data = p.read()
+        origin = {"architecture": options["architecture"], "base_checkpoint": options["base_checkpoint"]}
+        gpu_count = torch.cuda.device_count() if options["multi_gpu"] else 1
+        if options["multi_gpu"] and gpu_count < 2:
+            raise ValueError("O treino com múltiplas GPUs requer pelo menos duas GPUs CUDA visíveis.")
+        if (
+            options["multi_gpu"]
+            and options["precision"] == "bf16"
+            and any(torch.cuda.get_device_capability(index)[0] < 8 for index in range(gpu_count))
+        ):
+            raise ValueError("Uma das GPUs selecionadas não tem BF16 nativo. Escolha FP16 ou precisão total.")
+        if (options["multi_gpu"] or options["ram_cache_gib"]) and not data.get("prepared_vocabulary"):
+            raise ValueError("Prepare novamente o conjunto para usar múltiplas GPUs ou cache em RAM.")
+        studio_args = None
+        if data.get("prepared_vocabulary"):
+            vocabulary = p.path / "vocab.txt"
+            if data["prepared_vocabulary"] != vocabulary_digest(vocabulary) or data[
+                "prepared_base_vocabulary"
+            ] != vocabulary_digest(self.training_base_vocabulary(options["vocabulary"])):
+                raise ValueError("Prepare novamente com o vocabulário base selecionado.")
+            durations = json.loads((p.path / "duration.json").read_text(encoding="utf-8"))["duration"]
+            if options["validation_percent"] and len(durations) < 5:
+                raise ValueError("A validação requer pelo menos cinco exemplos aprovados.")
+            min_frames = int(max(durations) * 24000 / 256) + 1
+            if options["batch_size"] < min_frames:
+                raise ValueError(f"Use pelo menos {min_frames} frames por lote para incluir o trecho mais longo.")
+            signature = {
+                "dataset": data["prepared"],
+                "vocabulary": data["prepared_vocabulary"],
+                **{
+                    field: options[field]
+                    for field in (
+                        "seed",
+                        "validation_percent",
+                        "batch_size",
+                        "max_samples",
+                        "grad_accumulation",
+                        "use_8bit_optimizer",
+                    )
+                },
+            }
+            has_resume = any(Path(path).name.startswith("model_") for path in self.checkpoints(p.name))
+            signature["gpu_count"] = gpu_count
+            previous = {"gpu_count": 1, **data.get("training_signature", {})}
+            if has_resume and (previous["gpu_count"] != gpu_count or ("dataset" in previous and previous != signature)):
+                raise ValueError(
+                    "Para retomar, use os mesmos dados, quantidade de GPUs e parâmetros de lote, semente, validação e otimizador."
+                )
+            data["training_signature"] = signature
+        if (p.path / "vocab.txt").is_file():
+            studio_args = {
+                "dataset_path": str(p.path),
+                "base_vocabulary_rows": data.get("base_vocabulary_rows"),
+                "activation_checkpointing": options["activation_checkpointing"],
+                "tf32": options["tf32"],
+                "log_samples": options["log_samples"],
+                "seed": options["seed"],
+                "validation_percent": options["validation_percent"],
+                "gpu_count": gpu_count,
+                "ram_cache_gib": options["ram_cache_gib"],
+            }
         if not data.get("training_origin"):
             data["training_origin"] = origin
-            p.write(data)
+        p.write(data)
         self._stop_requested.clear()
-        self.job = {"running": True, "message": "Iniciando treinamento…", "project": p.name}
+        self.job = {
+            "running": True,
+            "message": "Iniciando treinamento…",
+            "project": p.name,
+            "log": deque(maxlen=120),
+            "progress": None,
+        }
 
         def worker():
             try:
@@ -1209,14 +1441,25 @@ class StudioService(StoryTools, LocalTools):
                     True,
                     options["base_checkpoint"],
                     "pinyin",
-                    options["vocabulary"],
+                    self.project_vocabulary(p.name) if studio_args else options["vocabulary"],
                     options["precision"],
-                    False,
+                    bool(studio_args),
                     "none",
                     options["use_8bit_optimizer"],
                     options["num_workers"],
+                    *([studio_args] if studio_args else []),
                 ):
-                    self.job["message"] = str(message)
+                    line = str(message).strip()
+                    progress = line.split()
+                    if (
+                        len(progress) == 5
+                        and progress[0] == "F5_STUDIO_PROGRESS"
+                        and all(value.isdecimal() for value in progress[1:])
+                    ):
+                        self.job["progress"] = tuple(map(int, progress[1:]))
+                    else:
+                        self.job["message"] = str(message)
+                        self.job["log"].append(line)
                     if self._stop_requested.is_set():
                         if backend.training_process is None:
                             self.job["message"] = "Treinamento cancelado antes de iniciar."
@@ -1232,7 +1475,7 @@ class StudioService(StoryTools, LocalTools):
                 self._operation.release()
 
         threading.Thread(target=worker, daemon=True).start()
-        return dict(self.job)
+        return {**self.job, "log": list(self.job["log"])}
 
     def stop_training(self):
         if not self.job["running"]:

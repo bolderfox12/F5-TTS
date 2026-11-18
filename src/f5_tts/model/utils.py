@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import random
+import unicodedata
 from collections import defaultdict
 from importlib.resources import files
 
@@ -158,7 +159,7 @@ def convert_char_to_pinyin(text_list, polyphone=True):
 
     for text in text_list:
         char_list = []
-        text = text.translate(custom_trans)
+        text = unicodedata.normalize("NFC", text).translate(custom_trans)
         for seg in rjieba.cut(text):
             seg_byte_len = len(bytes(seg, "UTF-8"))
             if seg_byte_len == len(seg):  # if pure alphabets and symbols

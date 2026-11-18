@@ -26,6 +26,7 @@ def register_model_pages(service, shell, action):
                     {
                         "F5TTS_v1_Base": t("F5-TTS v1 Base"),
                         "F5TTS_Base": t("F5-TTS Base (anterior)"),
+                        "F5TTS_Base_bigvgan": "F5-TTS Base · BigVGAN",
                         "E2TTS_Base": t("E2-TTS Base"),
                     },
                     value="F5TTS_v1_Base",
@@ -71,11 +72,39 @@ def register_model_pages(service, shell, action):
                     )
                     if result:
                         cards.refresh()
+                        source.set_options(service.model_choices())
                         ui.notify(
                             t("Modelo cadastrado. Selecione-o em Criar áudio ou Regravar áudio."), type="positive"
                         )
 
                 ui.button(t("Cadastrar modelo"), icon="add", on_click=save).props("no-caps")
+
+            with ui.card().classes("studio-card w-full gap-4"):
+                ui.label(t("Exportar checkpoint INT8 para CPU")).classes("font-semibold text-lg")
+                source = ui.select(service.model_choices(), label=t("Modelo de origem")).props("outlined")
+                int8_name = ui.input(t("Nome da cópia INT8")).props("outlined")
+                result_label = ui.label("").classes("studio-muted")
+
+                async def quantize():
+                    int8_button.disable()
+                    result_label.set_text(t("Quantizando pesos…"))
+                    try:
+                        result = await action(service.quantize_model, source.value, int8_name.value)
+                        if result:
+                            result_label.set_text(
+                                t(
+                                    "Modelo cadastrado · {before} → {after}",
+                                    before=format_bytes(result["source_size"]),
+                                    after=format_bytes(result["size"]),
+                                )
+                            )
+                            cards.refresh()
+                        else:
+                            result_label.set_text("")
+                    finally:
+                        int8_button.enable()
+
+                int8_button = ui.button(t("Criar cópia INT8"), icon="compress", on_click=quantize).props("no-caps")
 
             @ui.refreshable
             def cards():
@@ -97,6 +126,22 @@ def register_model_pages(service, shell, action):
                             ui.space()
                             ui.badge(format_bytes(model["size"]), color="teal-1", text_color="teal-9")
                         ui.label(model["architecture"]).classes("text-sm studio-muted")
+                        if model.get("quantized"):
+                            ui.badge("INT8 · CPU")
+                            with ui.row():
+                                ui.button(
+                                    t("Baixar pesos INT8"),
+                                    on_click=lambda item=model: ui.download.file(
+                                        item["checkpoint"], filename="modelo-int8.safetensors"
+                                    ),
+                                ).props("flat no-caps")
+                                if model["vocabulary"]:
+                                    ui.button(
+                                        t("Baixar vocabulário"),
+                                        on_click=lambda item=model: ui.download.file(
+                                            item["vocabulary"], filename="vocab.txt"
+                                        ),
+                                    ).props("flat no-caps")
                         if model.get("orphan"):
                             ui.label(t("Arquivo de checkpoint enviado, ainda não cadastrado como modelo.")).classes(
                                 "text-sm studio-muted"
@@ -126,8 +171,8 @@ def register_model_pages(service, shell, action):
                             delete_files = ui.checkbox(
                                 t("Apagar também o checkpoint local"),
                                 value=model["managed"],
-                                disable=not model["managed"],
                             )
+                            delete_files.set_enabled(model["managed"])
                             if model.get("project_checkpoint"):
                                 ui.label(
                                     t(
@@ -159,9 +204,10 @@ def register_model_pages(service, shell, action):
                                     "color=negative no-caps"
                                 )
                         with ui.row().classes("w-full justify-end"):
-                            ui.button(
-                                t("Remover"), icon="delete", on_click=confirm.open, disable=model["in_use"]
-                            ).props("flat no-caps")
+                            remove_button = ui.button(t("Remover"), icon="delete", on_click=confirm.open).props(
+                                "flat no-caps"
+                            )
+                            remove_button.set_enabled(not model["in_use"])
                 ui.button(t("Ir para Criar áudio"), icon="graphic_eq", on_click=lambda: ui.navigate.to("/")).props(
                     "no-caps"
                 )

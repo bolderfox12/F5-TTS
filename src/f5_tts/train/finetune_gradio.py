@@ -123,7 +123,7 @@ def save_settings(
 
 # Load settings from a JSON file
 def load_settings(project_name):
-    project_name = project_name.replace("_pinyin", "").replace("_char", "")
+    project_name = project_name.removesuffix("_pinyin").removesuffix("_char")
     path_project = _safe_project_path(path_project_ckpts, project_name)
     file_setting = os.path.join(path_project, "setting.json")
 
@@ -357,6 +357,7 @@ def start_training(
     logger,
     ch_8bit_adam,
     num_workers=16,
+    studio_options=None,
 ):
     global training_process, tts_api, stop_signal
 
@@ -400,15 +401,19 @@ def start_training(
     else:
         tokenizer_type = "custom"
 
-    dataset_name = dataset_name.replace("_pinyin", "").replace("_char", "")
+    dataset_name = dataset_name.removesuffix("_pinyin").removesuffix("_char")
 
-    if mixed_precision != "none":
-        fp16 = f"--mixed_precision={mixed_precision}"
+    python = shlex.quote(sys.executable)
+    if studio_options:
+        gpu_count = int(studio_options["gpu_count"])
+        launcher = python
+        if gpu_count > 1:
+            launcher += f" -m torch.distributed.run --standalone --nnodes=1 --nproc-per-node={gpu_count}"
     else:
-        fp16 = ""
+        launcher = f"{python} -m accelerate.commands.launch --mixed_precision={mixed_precision}"
 
     cmd = (
-        f'accelerate launch {fp16} "{file_train}" --exp_name {exp_name}'
+        f"{launcher} {shlex.quote(file_train)} --exp_name {exp_name}"
         f" --learning_rate {learning_rate}"
         f" --batch_size_per_gpu {batch_size_per_gpu}"
         f" --batch_size_type {batch_size_type}"
@@ -438,7 +443,20 @@ def start_training(
     if logger != "none":
         cmd += f" --logger {logger}"
 
-    cmd += " --log_samples"
+    if studio_options:
+        cmd += f" --dataset_path {shlex.quote(studio_options['dataset_path'])}"
+        if studio_options["base_vocabulary_rows"] is not None:
+            cmd += f" --base_vocabulary_rows {int(studio_options['base_vocabulary_rows'])}"
+        cmd += f" --seed {int(studio_options['seed'])}"
+        cmd += f" --validation_percent {int(studio_options['validation_percent'])}"
+        cmd += f" --ram_cache_gib {float(studio_options['ram_cache_gib'])}"
+        if studio_options["activation_checkpointing"]:
+            cmd += " --activation_checkpointing"
+        if studio_options["tf32"]:
+            cmd += " --tf32"
+
+    if not studio_options or studio_options["log_samples"]:
+        cmd += " --log_samples"
 
     if ch_8bit_adam:
         cmd += " --bnb_optimizer"
@@ -471,7 +489,7 @@ def start_training(
     try:
         if not stream:
             # Start the training process
-            training_process = subprocess.Popen(cmd, shell=True)
+            training_process = subprocess.Popen(shlex.split(cmd))
 
             time.sleep(5)
             yield "train start", gr.update(interactive=False), gr.update(interactive=True)
@@ -491,9 +509,12 @@ def start_training(
 
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
+            if studio_options:
+                env["ACCELERATE_MIXED_PRECISION"] = mixed_precision
+                env["ACCELERATE_USE_CPU"] = "false"
 
             training_process = subprocess.Popen(
-                cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, env=env
+                shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, env=env
             )
             yield "Training started ...", gr.update(interactive=False), gr.update(interactive=True)
 
@@ -1233,7 +1254,7 @@ def check_finetune(finetune):
 def get_checkpoints_project(project_name, is_gradio=True):
     if project_name is None:
         return [], ""
-    project_name = project_name.replace("_pinyin", "").replace("_char", "")
+    project_name = project_name.removesuffix("_pinyin").removesuffix("_char")
 
     if os.path.isdir(path_project_ckpts):
         files_checkpoints = glob(os.path.join(path_project_ckpts, project_name, "*.pt"))
@@ -1267,7 +1288,7 @@ def get_checkpoints_project(project_name, is_gradio=True):
 def get_audio_project(project_name, is_gradio=True):
     if project_name is None:
         return [], ""
-    project_name = project_name.replace("_pinyin", "").replace("_char", "")
+    project_name = project_name.removesuffix("_pinyin").removesuffix("_char")
 
     if os.path.isdir(path_project_ckpts):
         files_audios = glob(os.path.join(path_project_ckpts, project_name, "samples", "*.wav"))

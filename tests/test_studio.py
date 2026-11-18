@@ -11,14 +11,23 @@ import tempfile
 import threading
 import time
 import unittest
+from copy import copy
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import numpy as np
+import pytest
+import soundfile as sf
 import torch
+from safetensors.torch import save_file
+from torch import nn
 
-from f5_tts.audio import save_audio
+from f5_tts.audio import load_audio, save_audio
+from f5_tts.model.dataset import load_dataset
+from f5_tts.model.quantization import export_int8, int8_engine, is_int8_checkpoint, load_int8
 from f5_tts.studio.service import StudioService
+from f5_tts.train.studio_dataset import read_vocabulary
 
 
 class FakeModel:
@@ -188,6 +197,7 @@ class StudioTests(unittest.TestCase):
         def train(*args):
             backend.training_process = object()
             entered.set()
+            yield "F5_STUDIO_PROGRESS 2 8 1 4", {}, {}
             yield "running", {}, {}
             while not backend.stop_signal:
                 time.sleep(0.01)
@@ -211,6 +221,7 @@ class StudioTests(unittest.TestCase):
                 time.sleep(0.01)
         self.assertFalse(self.service.job["running"])
         self.assertIsNone(backend.training_process)
+        self.assertEqual(self.service.job["progress"], (2, 8, 1, 4))
         self.assertFalse(self.service._operation.locked())
 
 
@@ -218,6 +229,10 @@ class StudioTests(unittest.TestCase):
 class StudioRouteTests(unittest.TestCase):
     def test_five_real_pages_without_model_downloads(self):
         with tempfile.TemporaryDirectory() as folder:
+            workspace = Path(folder)
+            model = workspace / "existing-model.pt"
+            model.write_bytes(b"test checkpoint")
+            StudioService(workspace).register_model("Modelo cadastrado para teste", model)
             # Bind inside a child process so ui.run has its normal lifecycle.
             entry = (
                 "import os; [os.environ.pop(k) for k in list(os.environ) if k.lower().endswith('_proxy')]; "
@@ -259,7 +274,7 @@ class StudioRouteTests(unittest.TestCase):
                     ("/voices", "Suas vozes"),
                     ("/models", "Seus modelos"),
                     ("/stories", "Uma história"),
-                    ("/training", "Enviar seus"),
+                    ("/training", "Treinamento de voz"),
                     ("/history", "Tudo o que"),
                     ("/settings", "Controle o"),
                     ("/projects", "Histórias com"),
@@ -274,6 +289,12 @@ class StudioRouteTests(unittest.TestCase):
                     connection.close()
                     self.assertEqual(response.status, 200, route)
                     self.assertIn(expected, body)
+                    if route == "/models":
+                        self.assertIn("Modelo cadastrado para teste", body)
+                        self.assertIn("Criar cópia INT8", body)
+                    if route == "/training":
+                        self.assertIn("F5-TTS Base · BigVGAN", body)
+                        self.assertIn("Exportar checkpoint INT8 para CPU", body)
             finally:
                 process.terminate()
                 try:
@@ -281,6 +302,80 @@ class StudioRouteTests(unittest.TestCase):
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait(timeout=5)
+
+
+def test_paired_dataset_extends_vocabulary_without_changing_base_ids(tmp_path, monkeypatch):
+    service = StudioService(tmp_path / "workspace", tmp_path / "data")
+    monkeypatch.setattr(service, "checkpoints", lambda _: [])
+    base = tmp_path / "vocab.txt"
+    base.write_text(" \na\nb\nc\n", encoding="utf-8")
+    service.project("multilingual")
+    paths = [service.upload_path(f"my example {i}.WAV") for i in range(3)]
+    time = np.arange(5 * 24000) / 24000
+    for i, path in enumerate(paths):
+        sf.write(path, 0.1 * np.sin(2 * np.pi * (130 + i * 30) * time), 24000)
+    manifest = "\n".join(f"my example {i}.WAV|abc Ж" for i in range(3))
+
+    assert "3 trechos" in service.import_audio("multilingual", paths, "ru", True, manifest)
+    assert "0 trechos" in service.import_audio("multilingual", paths, "ru", True, manifest)
+    project = service.project("multilingual")
+    rows = project.rows()
+    assert not any(row[1] for row in rows)
+    for row in rows:
+        service.review("multilingual", row[0], row[2], True)
+    with pytest.raises(ValueError, match="fora do vocabulário"):
+        service.prepare("multilingual", str(base), False)
+    service.prepare("multilingual", str(base), True)
+
+    assert read_vocabulary(Path(service.project_vocabulary("multilingual"))) == [" ", "a", "b", "c", "Ж"]
+    assert project.read()["base_vocabulary_rows"] == 5
+    dataset = load_dataset(str(project.path), dataset_type="CustomDatasetPath")
+    assert len(dataset) == 3
+    assert "Ж" in dataset[0]["text"]
+    first_mel = dataset[0]["mel_spec"]
+    assert first_mel.shape[0] == 100
+    validation = copy(dataset)
+    dataset.cache_mels_in_ram(first_mel.numel() * first_mel.element_size())
+    cached_mel = dataset[0]["mel_spec"]
+    with patch("f5_tts.model.dataset.load_audio", wraps=load_audio) as reader:
+        assert dataset[0]["mel_spec"] is cached_mel
+        assert validation[0]["mel_spec"] is not cached_mel
+        dataset[1]
+        dataset[1]
+        assert reader.call_count == 3
+
+
+def test_int8_export_roundtrip(tmp_path):
+    try:
+        int8_engine()
+    except RuntimeError:
+        pytest.skip("Requires a CPU INT8 backend.")
+
+    def model():
+        network = nn.Module()
+        network.transformer = nn.Sequential(nn.Linear(32, 32), nn.ReLU(), nn.Linear(32, 8))
+        return network
+
+    original = model()
+    source = tmp_path / "source.safetensors"
+    target = tmp_path / "quantized.safetensors"
+    save_file({f"ema_model.{key}": value for key, value in original.state_dict().items()}, source)
+    export_int8(source, target)
+    assert is_int8_checkpoint(target)
+    assert target.stat().st_size < source.stat().st_size
+
+    service = StudioService(tmp_path / "workspace", tmp_path / "data")
+    vocabulary = tmp_path / "vocab.txt"
+    vocabulary.write_text(" \na\n", encoding="utf-8")
+    registered = service.register_model("Source", source, vocabulary)
+    result = service.quantize_model(registered["id"], "Source INT8")
+    assert result["quantized"]
+    assert Path(result["vocabulary"]) != vocabulary
+    assert Path(result["vocabulary"]).read_bytes() == vocabulary.read_bytes()
+    assert Path(result["checkpoint"]).read_bytes() == target.read_bytes()
+    quantized = load_int8(model(), result["checkpoint"])
+    inputs = torch.randn(4, 32)
+    torch.testing.assert_close(quantized.transformer(inputs), original.transformer(inputs), rtol=0.05, atol=0.03)
 
 
 if __name__ == "__main__":

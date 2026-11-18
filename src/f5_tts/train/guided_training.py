@@ -2,9 +2,12 @@
 
 import hashlib
 import json
+import math
 import re
+import subprocess
 import tempfile
 import threading
+import unicodedata
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
@@ -19,6 +22,12 @@ from f5_tts.audio import load_audio, save_audio
 
 
 _LOCK = threading.RLock()
+
+
+def training_upload_name(filename):
+    path = Path(filename)
+    stem = "".join(char if char.isalnum() or char in "-_." else "_" for char in path.stem)[:60]
+    return stem + path.suffix.lower()
 
 
 class TrainingProject:
@@ -48,12 +57,12 @@ class TrainingProject:
 
     @staticmethod
     def text(value):
-        value = " ".join(str(value).split())
+        value = unicodedata.normalize("NFC", " ".join(str(value).split()))
         if len(value) < 3 or "|" in value:
             raise ValueError("Informe o texto exato do áudio, com pelo menos 3 caracteres e sem o símbolo |.")
         return value
 
-    def add(self, audio_path, text, consent):
+    def add(self, audio_path, text, consent, source=None):
         if not consent:
             raise ValueError("Confirme que pode usar esta gravação para treinamento.")
         if not audio_path:
@@ -64,18 +73,87 @@ class TrainingProject:
             raise ValueError("Cada exemplo precisa ter entre 1 e 30 segundos. Prefira trechos de 3 a 12 segundos.")
         waveform, rate = load_audio(audio_path)
         waveform = waveform.mean(dim=0, keepdim=True)
-        if not torch.isfinite(waveform).all() or waveform.square().mean().sqrt() < 0.001:
+        rms = waveform.square().mean().sqrt().item()
+        if not torch.isfinite(waveform).all() or rms < 0.001:
             raise ValueError("O áudio está vazio, muito baixo ou contém valores inválidos. Grave novamente.")
         if rate != 24000:
             waveform = torchaudio.functional.resample(waveform, rate, 24000)
+        waveform = waveform.contiguous()
+        digest = hashlib.sha256(waveform.numpy().tobytes()).hexdigest()
+        quality = {
+            "rms_db": round(20 * math.log10(rms), 1),
+            "clipped_percent": round(100 * (waveform.abs() >= 0.999).float().mean().item(), 2),
+        }
         identifier = uuid4().hex
         with _LOCK:
-            save_audio(self.path / "wavs" / (identifier + ".wav"), waveform, 24000)
             data = self.read()
-            data["examples"].append({"id": identifier, "text": text, "duration": info.duration, "approved": False})
+            if source and any(example.get("audio_digest") == digest for example in data["examples"]):
+                raise ValueError("Este trecho já existe no projeto.")
+            save_audio(self.path / "wavs" / (identifier + ".wav"), waveform, 24000)
+            data["examples"].append(
+                {
+                    "id": identifier,
+                    "text": text,
+                    "duration": info.duration,
+                    "approved": False,
+                    "source": source or Path(audio_path).name,
+                    "audio_digest": digest,
+                    **quality,
+                }
+            )
             self.invalidate(data)
             self.write(data)
         return self.rows()
+
+    def import_transcripts(self, paths, manifest, consent):
+        if not consent or not paths:
+            raise ValueError("Selecione gravações e confirme a autorização de uso.")
+        transcripts = {}
+        for line in manifest.splitlines():
+            if not line.strip():
+                continue
+            filename, separator, text = line.partition("|")
+            filename = training_upload_name(filename.strip())
+            if not separator or not filename or filename in transcripts:
+                raise ValueError("Use uma linha única no formato arquivo.wav|transcrição para cada gravação.")
+            transcripts[filename] = self.text(text)
+
+        filenames = [Path(path).name.split("-", 1)[-1] for path in paths]
+        if len(filenames) != len(set(filenames)) or set(filenames) != set(transcripts):
+            raise ValueError("Os nomes do manifesto precisam corresponder aos arquivos selecionados, sem duplicatas.")
+
+        added, errors = 0, []
+        for path, filename in zip(paths, filenames, strict=True):
+            try:
+                try:
+                    self.add(path, transcripts[filename], consent, source=filename)
+                except sf.LibsndfileError:
+                    with tempfile.TemporaryDirectory() as folder:
+                        decoded = Path(folder) / "audio.wav"
+                        subprocess.run(
+                            [
+                                "ffmpeg",
+                                "-v",
+                                "error",
+                                "-i",
+                                str(path),
+                                "-t",
+                                "31",
+                                "-ac",
+                                "1",
+                                "-ar",
+                                "24000",
+                                str(decoded),
+                            ],
+                            check=True,
+                            capture_output=True,
+                            timeout=60,
+                        )
+                        self.add(decoded, transcripts[filename], consent, source=filename)
+                added += 1
+            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+                errors.append(f"{filename}: {error}")
+        return f"{added} trechos aguardando revisão." + ("\n" + "\n".join(errors) if errors else "")
 
     def rows(self):
         return [[e["id"], e["approved"], e["text"], round(e["duration"], 2)] for e in self.read()["examples"]]
@@ -172,7 +250,7 @@ def import_ready_audio(project, audio_files, language, consent, backend, progres
                         temporary = Path(folder) / "segment.wav"
                         sf.write(temporary, segment, 24000)
                         transcript = backend.transcribe(str(temporary), language or None)
-                        project.add(temporary, transcript, True)
+                        project.add(temporary, transcript, True, source=Path(audio_path).name.split("-", 1)[-1])
                         added += 1
         except Exception as error:
             errors.append(f"{Path(audio_path).name}: {error}")

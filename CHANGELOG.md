@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.3.5 — 2026-11-17
+
+### Added
+
+- Multi-file training imports with Whisper or a filename-to-transcript manifest, clip review with RMS
+  and clipping measurements, and optional vocabulary expansion that preserves base token IDs.
+- Single- or multi-GPU CUDA training, bounded spectrogram caching in host RAM, activation
+  recomputation, TF32, a training seed, and an optional held-out validation split.
+- Live training progress by optimizer update and charts for CPU, per-GPU utilization and VRAM,
+  RAM, training disk occupancy, and system disk I/O.
+- F5-TTS Base · BigVGAN for compatible fine-tuning, checkpoint comparison, and synthesis.
+- INT8 safetensors export for x86 CPU inference from training checkpoints and the model library.
+
+### Fixed
+
+- Fixed the inference progress callback that could interrupt audio generation.
+- Fixed the model library rendering with existing registered checkpoints and checkpoint writes
+  interrupted during training.
+
 ## 1.3.4 — 2026-11-15
 
 ### Added

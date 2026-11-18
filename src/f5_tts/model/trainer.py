@@ -3,6 +3,8 @@ from __future__ import annotations
 import gc
 import math
 import os
+import random
+import time
 
 import torch
 import wandb
@@ -53,6 +55,7 @@ class Trainer:
         is_local_vocoder: bool = False,  # use local path vocoder
         local_vocoder_path: str = "",  # local vocoder path
         model_cfg_dict: dict = dict(),  # training config
+        base_vocabulary_rows: int | None = None,
     ):
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
 
@@ -102,6 +105,7 @@ class Trainer:
                 self.writer = SummaryWriter(log_dir=f"runs/{wandb_run_name}")
 
         self.model = model
+        self.base_vocabulary_rows = base_vocabulary_rows
 
         if self.is_main:
             self.ema_model = EMA(model, include_online_model=False, **ema_kwargs)
@@ -159,13 +163,19 @@ class Trainer:
             )
             if not os.path.exists(self.checkpoint_path):
                 os.makedirs(self.checkpoint_path)
-            if last:
-                self.accelerator.save(checkpoint, f"{self.checkpoint_path}/model_last.pt")
-                print(f"Saved last checkpoint at update {update}")
-            else:
-                if self.keep_last_n_checkpoints == 0:
-                    return
-                self.accelerator.save(checkpoint, f"{self.checkpoint_path}/model_{update}.pt")
+            if not last and self.keep_last_n_checkpoints == 0:
+                return
+            filename = "model_last.pt" if last else f"model_{update}.pt"
+            destination = os.path.join(self.checkpoint_path, filename)
+            temporary = destination + ".tmp"
+            try:
+                self.accelerator.save(checkpoint, temporary)
+                os.replace(temporary, destination)
+            finally:
+                if os.path.exists(temporary):
+                    os.remove(temporary)
+            print(f"Saved {'last ' if last else ''}checkpoint at update {update}")
+            if not last:
                 if self.keep_last_n_checkpoints > 0:
                     # Updated logic to exclude pretrained model from rotation
                     checkpoints = [
@@ -228,6 +238,22 @@ class Trainer:
             if key in checkpoint["ema_model_state_dict"]:
                 del checkpoint["ema_model_state_dict"][key]
 
+        is_pretrained = latest_checkpoint.startswith("pretrained_")
+        if is_pretrained and self.base_vocabulary_rows is not None:
+            # Existing IDs and the padding row retain their pretrained embeddings.
+            model = self.accelerator.unwrap_model(self.model)
+            weight = model.transformer.text_embed.text_embed.weight.detach()
+            key = "ema_model.transformer.text_embed.text_embed.weight"
+            state = checkpoint["ema_model_state_dict"]
+            base_weight = state[key]
+            if base_weight.shape != (self.base_vocabulary_rows, weight.shape[1]) or weight.shape[0] < len(base_weight):
+                raise ValueError("The base vocabulary does not match the checkpoint's text embedding.")
+            if weight.shape[0] > len(base_weight):
+                state[key] = torch.cat((base_weight, weight[len(base_weight) :].to(base_weight)))
+
+            # Fine-tuning a checkpoint uses its EMA weights and starts a fresh optimizer.
+            checkpoint = {"ema_model_state_dict": state}
+
         if self.is_main:
             self.ema_model.load_state_dict(checkpoint["ema_model_state_dict"])
 
@@ -262,7 +288,43 @@ class Trainer:
         gc.collect()
         return update
 
-    def train(self, train_dataset: Dataset, num_workers=16, resumable_with_seed: int = None):
+    @torch.inference_mode()
+    def validate(self, dataset, epoch):
+        model = self.ema_model.ema_model
+        model.eval()
+        device = self.accelerator.device
+        losses = []
+        py_state = random.getstate()
+        try:
+            random.seed(0)
+            devices = [device] if device.type == "cuda" else []
+            with torch.random.fork_rng(devices=devices), self.accelerator.autocast():
+                torch.random.default_generator.manual_seed(0)
+                if devices:
+                    torch.cuda.manual_seed(0)
+                for index in range(min(len(dataset), 24)):
+                    batch = collate_fn([dataset[index]])
+                    loss, _, _ = model(
+                        batch["mel"].to(device).transpose(1, 2),
+                        text=batch["text"],
+                        lens=batch["mel_lengths"].to(device),
+                    )
+                    losses.append(loss.item())
+        finally:
+            random.setstate(py_state)
+            model.train()
+        print(
+            f"Validação · época {epoch} · {len(losses)} exemplos · loss EMA {sum(losses) / len(losses):.5f}", flush=True
+        )
+
+    def train(
+        self,
+        train_dataset: Dataset,
+        num_workers=16,
+        resumable_with_seed: int | None = None,
+        validation_dataset=None,
+        studio_progress=False,
+    ):
         if self.log_samples:
             from f5_tts.infer.utils_infer import cfg_strength, load_vocoder, nfe_step, sway_sampling_coef
 
@@ -279,13 +341,14 @@ class Trainer:
         else:
             generator = None
 
+        batch_sampler = None
         if self.batch_size_type == "sample":
             train_dataloader = DataLoader(
                 train_dataset,
                 collate_fn=collate_fn,
                 num_workers=num_workers,
                 pin_memory=True,
-                persistent_workers=True,
+                persistent_workers=num_workers > 0,
                 batch_size=self.batch_size_per_gpu,
                 shuffle=True,
                 generator=generator,
@@ -299,46 +362,53 @@ class Trainer:
                 max_samples=self.max_samples,
                 random_seed=resumable_with_seed,  # This enables reproducible shuffling
                 drop_residual=False,
+                num_replicas=self.accelerator.num_processes if studio_progress else 1,
             )
             train_dataloader = DataLoader(
                 train_dataset,
                 collate_fn=collate_fn,
                 num_workers=num_workers,
                 pin_memory=True,
-                persistent_workers=True,
+                persistent_workers=num_workers > 0,
                 batch_sampler=batch_sampler,
             )
         else:
             raise ValueError(f"batch_size_type must be either 'sample' or 'frame', but received {self.batch_size_type}")
 
-        #  accelerator.prepare() dispatches batches to devices;
-        #  which means the length of dataloader calculated before, should consider the number of devices
-        warmup_updates = (
-            self.num_warmup_updates * self.accelerator.num_processes
-        )  # consider a fixed warmup steps while using accelerate multi-gpu ddp
-        # otherwise by default with split_batches=False, warmup steps change with num_processes
-        total_updates = math.ceil(len(train_dataloader) / self.grad_accumulation_steps) * self.epochs
-        decay_updates = total_updates - warmup_updates
-        warmup_scheduler = LinearLR(self.optimizer, start_factor=1e-8, end_factor=1.0, total_iters=warmup_updates)
-        decay_scheduler = LinearLR(self.optimizer, start_factor=1.0, end_factor=1e-8, total_iters=decay_updates)
-        self.scheduler = SequentialLR(
-            self.optimizer, schedulers=[warmup_scheduler, decay_scheduler], milestones=[warmup_updates]
+        train_dataloader = self.accelerator.prepare(train_dataloader)
+        batches_per_epoch = len(train_dataloader)
+        if batches_per_epoch == 0:
+            raise ValueError("Há poucos lotes para as GPUs selecionadas. Reduza o tamanho do lote ou use menos GPUs.")
+        updates_per_epoch = math.ceil(batches_per_epoch / self.grad_accumulation_steps)
+        planned_updates = updates_per_epoch * self.epochs
+        scheduler_steps = planned_updates * self.accelerator.num_processes
+        warmup_updates = min(self.num_warmup_updates * self.accelerator.num_processes, scheduler_steps - 1)
+        decay_scheduler = LinearLR(
+            self.optimizer, start_factor=1.0, end_factor=1e-8, total_iters=scheduler_steps - warmup_updates
         )
-        train_dataloader, self.scheduler = self.accelerator.prepare(
-            train_dataloader, self.scheduler
-        )  # actual multi_gpu updates = single_gpu updates / gpu nums
+        warmup_scheduler = LinearLR(
+            self.optimizer, start_factor=1e-8 if warmup_updates else 1.0, end_factor=1.0, total_iters=warmup_updates
+        )
+        self.scheduler = self.accelerator.prepare(
+            SequentialLR(self.optimizer, schedulers=[warmup_scheduler, decay_scheduler], milestones=[warmup_updates])
+        )
         start_update = self.load_checkpoint()
         global_update = start_update
+        last_progress = 0.0
 
         if exists(resumable_with_seed):
-            orig_epoch_step = len(train_dataloader)
-            start_step = start_update * self.grad_accumulation_steps
-            skipped_epoch = int(start_step // orig_epoch_step)
-            skipped_batch = start_step % orig_epoch_step
+            skipped_epoch, skipped_updates = divmod(start_update, updates_per_epoch)
+            skipped_batch = skipped_updates * self.grad_accumulation_steps
             skipped_dataloader = self.accelerator.skip_first_batches(train_dataloader, num_batches=skipped_batch)
         else:
             skipped_epoch = 0
 
+        if studio_progress and self.is_main:
+            print(
+                f"F5_STUDIO_PROGRESS {global_update} {planned_updates} "
+                f"{min(skipped_epoch + 1, self.epochs)} {self.epochs}",
+                flush=True,
+            )
         for epoch in range(skipped_epoch, self.epochs):
             self.model.train()
             if exists(resumable_with_seed) and epoch == skipped_epoch:
@@ -349,11 +419,13 @@ class Trainer:
                 current_dataloader = train_dataloader
 
             # Set epoch for the batch sampler if it exists
-            if hasattr(train_dataloader, "batch_sampler") and hasattr(train_dataloader.batch_sampler, "set_epoch"):
-                train_dataloader.batch_sampler.set_epoch(epoch)
+            if batch_sampler is not None:
+                batch_sampler.set_epoch(epoch)
+            if hasattr(current_dataloader, "set_epoch"):
+                current_dataloader.set_epoch(epoch)
 
             progress_bar = tqdm(
-                range(math.ceil(len(train_dataloader) / self.grad_accumulation_steps)),
+                range(updates_per_epoch),
                 desc=f"Epoch {epoch + 1}/{self.epochs}",
                 unit="update",
                 disable=not self.accelerator.is_local_main_process,
@@ -390,6 +462,14 @@ class Trainer:
                     global_update += 1
                     progress_bar.update(1)
                     progress_bar.set_postfix(update=str(global_update), loss=loss.item())
+                    if studio_progress and self.is_main:
+                        now = time.monotonic()
+                        if now - last_progress >= 0.5 or global_update % updates_per_epoch == 0:
+                            last_progress = now
+                            print(
+                                f"F5_STUDIO_PROGRESS {global_update} {planned_updates} {epoch + 1} {self.epochs}",
+                                flush=True,
+                            )
 
                 if self.accelerator.is_local_main_process:
                     self.accelerator.log(
@@ -432,6 +512,11 @@ class Trainer:
                         save_audio(f"{log_samples_path}/update_{global_update}_gen.wav", gen_audio, target_sample_rate)
                         save_audio(f"{log_samples_path}/update_{global_update}_ref.wav", ref_audio, target_sample_rate)
                         self.model.train()
+
+            if validation_dataset is not None:
+                if self.is_main:
+                    self.validate(validation_dataset, epoch + 1)
+                self.accelerator.wait_for_everyone()
 
         self.save_checkpoint(global_update, last=True)
 

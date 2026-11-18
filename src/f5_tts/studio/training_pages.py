@@ -1,5 +1,6 @@
 """Training workspace: data review, GPU tuning, checkpoint audition and deployment."""
 
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 
@@ -36,11 +37,17 @@ def register_training_pages(service, shell, action, audio_upload):
                         if not project:
                             return
                         state["project"] = project.name
+                        state["selected"] = ""
+                        sample_audio.set_source("")
+                        quality_label.set_text("")
+                        correction.set_value("")
+                        approved.set_value(False)
                         project_name.set_value(project.name.removesuffix("_pinyin"))
                         project_label.set_text(t("Projeto aberto: ") + project.name)
                         saved_project.set_options(service.projects())
                         saved_project.set_value(project.name)
                         refresh_rows.refresh()
+                        dataset_status.set_content(project.summary())
                         load_options()
                         await refresh_checkpoints()
                         await refresh_gpu()
@@ -52,6 +59,7 @@ def register_training_pages(service, shell, action, audio_upload):
                 train_tab = ui.tab("train", label=t("Treino e GPU"), icon="memory")
                 eval_tab = ui.tab("evaluate", label=t("Avaliar checkpoints"), icon="compare")
                 deploy_tab = ui.tab("deploy", label=t("Usar na inferência"), icon="rocket_launch")
+                quantize_tab = ui.tab("quantize", label=t("Quantização"), icon="compress")
 
             with ui.tab_panels(tabs, value=data_tab).classes("w-full"):
                 with ui.tab_panel(data_tab):
@@ -65,10 +73,31 @@ def register_training_pages(service, shell, action, audio_upload):
                         import_status = ui.label(t("Nenhum arquivo enviado.")).classes("text-sm")
                         audio_upload(uploads, import_status, multiple=True)
                         language = ui.select(
-                            {"pt": t("Português"), "en": t("Inglês"), "es": t("Espanhol"), "": t("Detectar idioma")},
+                            {
+                                "pt": t("Português"),
+                                "en": t("Inglês"),
+                                "es": t("Espanhol"),
+                                "fr": t("Francês"),
+                                "de": t("Alemão"),
+                                "it": "Italiano",
+                                "zh": "中文",
+                                "ja": "日本語",
+                                "ko": "한국어",
+                                "ar": "العربية",
+                                "ru": "Русский",
+                                "hi": "हिन्दी",
+                                "vi": "Tiếng Việt",
+                                "": t("Detectar idioma"),
+                            },
                             value="pt",
                             label=t("Idioma das gravações"),
                         ).props("outlined")
+                        with ui.expansion(t("Importar com transcrições prontas"), icon="description").classes("w-full"):
+                            transcripts = (
+                                ui.textarea(t("Uma linha por áudio curto no formato arquivo.wav|transcrição"))
+                                .props("outlined rows=4")
+                                .classes("w-full")
+                            )
                         consent = ui.checkbox(t("Tenho autorização para usar estas gravações no treinamento"))
                         import_message = ui.label("").classes("whitespace-pre-wrap studio-muted")
 
@@ -85,21 +114,25 @@ def register_training_pages(service, shell, action, audio_upload):
                                     list(uploads),
                                     language.value,
                                     consent.value,
+                                    transcripts.value,
                                 )
                                 if result is not None:
                                     import_message.set_text(t(str(result)))
                                     uploads.clear()
+                                    transcripts.set_value("")
+                                    import_status.set_text(t("Nenhum arquivo enviado."))
                                     refresh_rows.refresh()
                             finally:
                                 import_button.enable()
 
                         import_button = ui.button(
-                            t("Importar e transcrever"), icon="text_snippet", on_click=import_recordings
+                            t("Importar gravações"), icon="text_snippet", on_click=import_recordings
                         ).props("no-caps unelevated")
 
                     with ui.card().classes("studio-card w-full gap-4"):
                         ui.label(t("2. Revise cada trecho antes de preparar")).classes("font-semibold text-lg")
                         sample_audio = ui.audio("").classes("w-full")
+                        quality_label = ui.label("").classes("studio-muted text-sm")
                         correction = ui.textarea(t("Transcrição exata")).props("outlined rows=3")
                         approved = ui.checkbox(t("Ouvi e aprovei este trecho"))
 
@@ -110,6 +143,12 @@ def register_training_pages(service, shell, action, audio_upload):
                             state["selected"] = row["id"]
                             correction.set_value(row["text"])
                             approved.set_value(row["approved"])
+                            level, clipping = row["rms_db"], row["clipped_percent"]
+                            quality_label.set_text(
+                                t("Nível RMS: {level} dBFS · clipping: {clipping}%", level=level, clipping=clipping)
+                                if level is not None
+                                else ""
+                            )
                             project = service.project(state["project"])
                             sample_audio.set_source(str(project.path / "wavs" / (row["id"] + ".wav")))
 
@@ -131,13 +170,22 @@ def register_training_pages(service, shell, action, audio_upload):
                             ).classes("studio-muted")
                             ui.table(
                                 columns=[
+                                    {"name": "source", "label": t("Arquivo"), "field": "source", "align": "left"},
                                     {"name": "text", "label": t("Texto"), "field": "text", "align": "left"},
                                     {"name": "approved", "label": t("Aprovado"), "field": "approved"},
                                     {"name": "seconds", "label": t("Duração (s)"), "field": "seconds"},
                                 ],
                                 rows=[
-                                    {"id": row[0], "approved": row[1], "text": row[2], "seconds": row[3]}
-                                    for row in project.rows()
+                                    {
+                                        "id": row["id"],
+                                        "approved": row["approved"],
+                                        "text": row["text"],
+                                        "source": row.get("source", "—"),
+                                        "seconds": round(row["duration"], 2),
+                                        "rms_db": row.get("rms_db"),
+                                        "clipped_percent": row.get("clipped_percent"),
+                                    }
+                                    for row in examples
                                 ],
                                 row_key="id",
                                 selection="single",
@@ -158,10 +206,17 @@ def register_training_pages(service, shell, action, audio_upload):
                             if result is not None:
                                 refresh_rows.refresh()
 
+                        extend_vocab = ui.checkbox(t("Ampliar vocabulário com tokens dos textos aprovados"), value=True)
+
                         async def prepare_dataset():
-                            result = await action(service.prepare, state["project"])
+                            if not state["project"]:
+                                ui.notify(t("Abra um projeto para revisar os dados."), type="warning")
+                                return
+                            result = await action(
+                                service.prepare, state["project"], base_vocabulary.value or "", extend_vocab.value
+                            )
                             if result:
-                                dataset_status.set_text(t(str(result)))
+                                dataset_status.set_content(result)
                                 ui.notify(t("Dados preparados para treinamento."), type="positive")
 
                         with ui.row():
@@ -169,39 +224,102 @@ def register_training_pages(service, shell, action, audio_upload):
                             ui.button(t("Preparar conjunto aprovado"), icon="dataset", on_click=prepare_dataset).props(
                                 "no-caps unelevated"
                             )
-                        dataset_status = ui.label(
+                        dataset_status = ui.markdown(
                             t("A preparação verifica transcrições, arquivos e vocabulário.")
-                        ).classes("studio-muted")
+                        ).classes("studio-muted whitespace-pre-wrap")
 
                 with ui.tab_panel(train_tab):
                     with ui.card().classes("studio-card w-full gap-4"):
-                        ui.label(t("Estado da GPU")).classes("font-semibold text-lg")
-                        gpu_status = ui.label(t("Lendo estado da GPU…")).classes("studio-muted")
+                        ui.label(t("Monitor de recursos")).classes("font-semibold text-lg")
+                        resource_status = ui.label("").classes("studio-muted whitespace-pre-wrap")
+
+                        with ui.row().classes("w-full gap-4"):
+                            usage_chart = ui.echart(
+                                {
+                                    "animation": False,
+                                    "tooltip": {"trigger": "axis"},
+                                    "legend": {"type": "scroll", "bottom": 0},
+                                    "grid": {"left": 48, "right": 15, "top": 20, "bottom": 50},
+                                    "xAxis": {"type": "category", "boundaryGap": False, "data": []},
+                                    "yAxis": {"type": "value", "max": 100, "axisLabel": {"formatter": "{value}%"}},
+                                    "series": [],
+                                }
+                            ).classes("h-64 grow min-w-[280px]")
+                            disk_chart = ui.echart(
+                                {
+                                    "animation": False,
+                                    "tooltip": {"trigger": "axis"},
+                                    "legend": {"bottom": 0},
+                                    "grid": {"left": 55, "right": 15, "top": 26, "bottom": 50},
+                                    "xAxis": {"type": "category", "boundaryGap": False, "data": []},
+                                    "yAxis": {"type": "value", "name": "MiB/s", "min": 0},
+                                    "series": [],
+                                }
+                            ).classes("h-64 grow min-w-[280px]")
+                        resource_samples = []
 
                         async def refresh_gpu():
-                            if not state["project"]:
+                            if tabs.value not in (train_tab, train_tab.props["name"]):
                                 return
-                            info = await run.io_bound(service.training_hardware)
-                            if not info["cuda"]:
-                                gpu_status.set_text(
+                            metrics = await action(service.system_metrics, True)
+                            if metrics is None:
+                                return
+                            values = {
+                                t("CPU"): metrics["cpu_percent"],
+                                t("RAM"): metrics["ram_percent"],
+                                t("Ocupação do SSD"): metrics["disk_used_percent"],
+                            }
+                            disk_values = {
+                                t("Leitura do sistema"): round(metrics["disk_read_mbps"], 1),
+                                t("Gravação do sistema"): round(metrics["disk_write_mbps"], 1),
+                            }
+                            details = [
+                                f"CPU {metrics['cpu_percent']:.0f}% · RAM {metrics['ram_used_gb']:.1f}/"
+                                f"{metrics['ram_total_gb']:.1f} GiB · SSD {metrics['disk_free_gb']:.1f} GiB {t('livre')}"
+                            ]
+                            gpus = metrics["gpus"]
+                            multi_gpu.set_enabled(len(gpus) >= 2 or bool(multi_gpu.value))
+                            if not gpus:
+                                details.append(
                                     t(
                                         "CUDA indisponível. Os dados podem ser preparados, mas o treino precisa de uma GPU NVIDIA."
                                     )
                                 )
-                                return
-                            details = [
-                                f"{info['name']} · {info['memory']} GB VRAM · {t('livre')}: {info['free']} GB · {t('alocada')}: {info['allocated']} GB"
-                            ]
-                            if info.get("utilization") is not None:
-                                details.append(
-                                    f"{t('Uso')} {info['utilization']}% · {t('temperatura')} {info['temperature']} °C · {info['power']} W"
-                                )
-                            gpu_status.set_text(" | ".join(details))
+                            for gpu in gpus:
+                                label = f"GPU {gpu['index']}"
+                                values[label] = gpu["utilization"]
+                                used = gpu["used_gib"]
+                                total = gpu["total_gib"]
+                                vram = f"{label} · VRAM"
+                                values[vram] = round(100 * used / total, 1) if used is not None and total else None
+                                utilization = f"{gpu['utilization']:.0f}%" if gpu["utilization"] is not None else "—"
+                                memory = f"{used:.1f}/{total:.1f} GiB" if used is not None else "—"
+                                status = f"{label} · {gpu['name']} · {utilization} · VRAM {memory}"
+                                if gpu["temperature"] is not None:
+                                    status += f" · {gpu['temperature']:.0f} °C"
+                                if gpu["power"] is not None:
+                                    status += f" · {gpu['power']:.0f} W"
+                                details.append(status)
+                            resource_status.set_text("\n".join(details))
+                            resource_samples.append((datetime.now().strftime("%H:%M:%S"), values, disk_values))
+                            del resource_samples[:-60]
+                            for chart, series_index, current in (
+                                (usage_chart, 1, values),
+                                (disk_chart, 2, disk_values),
+                            ):
+                                chart.options["xAxis"]["data"] = [sample[0] for sample in resource_samples]
+                                chart.options["series"] = [
+                                    {
+                                        "name": series,
+                                        "type": "line",
+                                        "showSymbol": False,
+                                        "data": [sample[series_index].get(series) for sample in resource_samples],
+                                    }
+                                    for series in current
+                                ]
+                                chart.update()
 
-                        async def poll_gpu():
-                            await refresh_gpu()
-
-                        ui.timer(5, poll_gpu)
+                        ui.timer(2, refresh_gpu)
 
                     with ui.card().classes("studio-card w-full gap-4"):
                         ui.label(t("Modelo inicial e vocabulário")).classes("font-semibold text-lg")
@@ -245,6 +363,7 @@ def register_training_pages(service, shell, action, audio_upload):
                             {
                                 "F5TTS_v1_Base": "F5-TTS v1 Base",
                                 "F5TTS_Base": "F5-TTS Base",
+                                "F5TTS_Base_bigvgan": "F5-TTS Base · BigVGAN",
                                 "E2TTS_Base": "E2-TTS Base",
                             },
                             value="F5TTS_v1_Base",
@@ -264,6 +383,26 @@ def register_training_pages(service, shell, action, audio_upload):
                             label=t("Precisão numérica"),
                         ).props("outlined")
                         use_8bit = ui.switch(t("Otimizador Adam de 8 bits · reduz memória da GPU"), value=False)
+                        activation_checkpointing = ui.switch(t("Recomputar ativações · economiza VRAM no F5-TTS"))
+                        tf32 = ui.switch(t("TF32 · acelera operações em GPUs NVIDIA Ampere ou mais novas"))
+                        log_samples = ui.switch(t("Gerar áudios de amostra ao salvar checkpoints"))
+                        multi_gpu = ui.switch(t("Usar múltiplas GPUs CUDA")).set_enabled(False)
+                        ui.label(
+                            t(
+                                "Desativado: usa a primeira GPU visível. Ativado: distribui o treino pelas GPUs CUDA visíveis."
+                            )
+                        ).classes("studio-muted text-sm")
+                        cache_in_ram = ui.switch(t("Cache de espectrogramas em RAM"))
+                        cache_budget = (
+                            ui.number(t("Limite total de cache (GiB)"), value=4.0, min=0.25, max=1024, step=0.25)
+                            .props("outlined")
+                            .bind_visibility_from(cache_in_ram, "value")
+                        )
+                        ui.label(
+                            t(
+                                "Reutiliza espectrogramas entre épocas. O Studio divide o limite entre as GPUs e ajusta a leitura para usar o cache."
+                            )
+                        ).classes("studio-muted text-sm").bind_visibility_from(cache_in_ram, "value")
                         with ui.expansion(t("Controles avançados de desempenho e treino"), icon="tune").classes(
                             "w-full"
                         ):
@@ -296,6 +435,13 @@ def register_training_pages(service, shell, action, audio_upload):
                                 t("Manter checkpoints recentes"), value=5, min=1, max=1000, step=1
                             ).props("outlined")
 
+                            seed = ui.number(t("Semente do treino"), value=666, min=0, max=4294967295, step=1).props(
+                                "outlined"
+                            )
+                            validation = ui.number(
+                                t("Reserva para validação (%)"), value=0, min=0, max=30, step=1
+                            ).props("outlined")
+
                         async def apply_gpu_profile():
                             profile = await action(service.gpu_training_recommendation)
                             if not profile:
@@ -307,6 +453,10 @@ def register_training_pages(service, shell, action, audio_upload):
                             num_workers.set_value(profile["num_workers"])
                             precision.set_value(profile["precision"])
                             use_8bit.set_value(profile["use_8bit_optimizer"])
+                            activation_checkpointing.set_value(
+                                profile["activation_checkpointing"] and architecture.value != "E2TTS_Base"
+                            )
+                            tf32.set_value(profile["tf32"])
                             ui.notify(t("Perfil ajustado para ") + profile["hardware"]["name"], type="positive")
 
                         def load_options():
@@ -318,6 +468,14 @@ def register_training_pages(service, shell, action, audio_upload):
                             base_vocabulary.set_value(options["vocabulary"])
                             precision.set_value(options["precision"])
                             use_8bit.set_value(options["use_8bit_optimizer"])
+                            activation_checkpointing.set_value(options["activation_checkpointing"])
+                            tf32.set_value(options["tf32"])
+                            log_samples.set_value(options["log_samples"])
+                            seed.set_value(options["seed"])
+                            validation.set_value(options["validation_percent"])
+                            multi_gpu.set_value(options["multi_gpu"])
+                            cache_in_ram.set_value(options["ram_cache_gib"] > 0)
+                            cache_budget.set_value(options["ram_cache_gib"] or 4.0)
                             batch_size.set_value(options["batch_size"])
                             max_samples.set_value(options["max_samples"])
                             grad_accumulation.set_value(options["grad_accumulation"])
@@ -336,6 +494,13 @@ def register_training_pages(service, shell, action, audio_upload):
                                 "vocabulary": base_vocabulary.value or "",
                                 "precision": precision.value,
                                 "use_8bit_optimizer": use_8bit.value,
+                                "activation_checkpointing": activation_checkpointing.value,
+                                "tf32": tf32.value,
+                                "log_samples": log_samples.value,
+                                "seed": seed.value,
+                                "validation_percent": validation.value,
+                                "multi_gpu": multi_gpu.value,
+                                "ram_cache_gib": cache_budget.value if cache_in_ram.value else 0.0,
                                 "batch_size": batch_size.value,
                                 "max_samples": max_samples.value,
                                 "grad_accumulation": grad_accumulation.value,
@@ -382,7 +547,45 @@ def register_training_pages(service, shell, action, audio_upload):
                         job_status = ui.label(service.job["message"]).classes(
                             "whitespace-pre-wrap w-full rounded-lg bg-slate-100 p-4 text-sm"
                         )
-                        ui.timer(1, lambda: job_status.set_text(t(service.job["message"])))
+                        ui.label(t("Progresso do treinamento")).classes("font-semibold")
+                        progress_bar = ui.linear_progress(value=0, show_value=False).props("rounded")
+                        progress_description = ui.label("").classes("studio-muted text-sm")
+                        job_log = ui.log(max_lines=80).classes("w-full h-48 text-sm")
+                        last_log = []
+
+                        def update_job():
+                            nonlocal last_log
+                            job = service.job
+                            job_status.set_text(t(job["message"]))
+                            progress = job.get("progress")
+                            progress_bar.props(
+                                "indeterminate" if job["running"] and not progress else "",
+                                remove="indeterminate" if progress or not job["running"] else "",
+                            )
+                            progress_bar.set_value(min(1, progress[0] / progress[1]) if progress and progress[1] else 0)
+                            if progress:
+                                completed, total, epoch, epochs = progress
+                                progress_description.set_text(
+                                    t(
+                                        "{percent}% · Época {epoch}/{epochs} · {done}/{total} atualizações",
+                                        percent=min(100, round(100 * completed / max(1, total))),
+                                        epoch=epoch,
+                                        epochs=epochs,
+                                        done=completed,
+                                        total=total,
+                                    )
+                                )
+                            else:
+                                progress_description.set_text("")
+                            messages = list(job.get("log", ()))
+                            if messages != last_log:
+                                job_log.clear()
+                                for message in messages[-80:]:
+                                    if message:
+                                        job_log.push(message)
+                                last_log = messages
+
+                        ui.timer(1, update_job)
                         ui.label(
                             t(
                                 "O modelo original e seus outros projetos permanecem intactos. O treino continua no último checkpoint deste projeto."
@@ -408,6 +611,7 @@ def register_training_pages(service, shell, action, audio_upload):
                             if found is not None:
                                 checkpoints.set_options({path: Path(path).name for path in found})
                                 available_checkpoint.set_options({path: Path(path).name for path in found})
+                                quant_checkpoint.set_options({path: Path(path).name for path in found})
                                 if found:
                                     ui.notify(
                                         t("{value_0} checkpoints encontrados.", value_0=len(found)), type="positive"
@@ -562,3 +766,52 @@ def register_training_pages(service, shell, action, audio_upload):
                         ui.button(
                             t("Abrir Meus modelos"), icon="inventory_2", on_click=lambda: ui.navigate.to("/models")
                         ).props("flat no-caps")
+
+                with ui.tab_panel(quantize_tab):
+                    with ui.card().classes("studio-card w-full gap-4"):
+                        from f5_tts.studio.model_pages import format_bytes
+
+                        ui.label(t("Exportar checkpoint INT8 para CPU")).classes("font-semibold text-lg")
+                        ui.label(
+                            t(
+                                "O Studio quantiza as camadas lineares do modelo e cadastra a cópia para inferência em CPU x86."
+                            )
+                        ).classes("studio-muted")
+                        quant_checkpoint = ui.select({}, label=t("Checkpoint do projeto")).props("outlined")
+                        quant_name = ui.input(t("Nome da cópia INT8")).props("outlined")
+                        quant_message = ui.label("").classes("studio-muted")
+
+                        async def quantize():
+                            if not state["project"] or not quant_checkpoint.value:
+                                ui.notify(t("Abra o projeto e selecione um checkpoint."), type="warning")
+                                return
+                            quant_button.disable()
+                            quant_message.set_text(t("Quantizando pesos…"))
+                            try:
+                                result = await action(
+                                    service.quantize_model,
+                                    "",
+                                    quant_name.value,
+                                    state["project"],
+                                    quant_checkpoint.value,
+                                )
+                                if result:
+                                    quant_message.set_text(
+                                        t(
+                                            "Modelo cadastrado · {before} → {after}",
+                                            before=format_bytes(result["source_size"]),
+                                            after=format_bytes(result["size"]),
+                                        )
+                                    )
+                                    ui.download.file(result["checkpoint"], filename="modelo-int8.safetensors")
+                                else:
+                                    quant_message.set_text("")
+                            finally:
+                                quant_button.enable()
+
+                        quant_button = ui.button(t("Quantizar e baixar"), icon="compress", on_click=quantize).props(
+                            "no-caps unelevated"
+                        )
+                        ui.button(
+                            t("Abrir Meus modelos"), icon="inventory_2", on_click=lambda: ui.navigate.to("/models")
+                        )

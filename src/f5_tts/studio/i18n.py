@@ -22,7 +22,10 @@ LOCALE_ORDER = tuple(INTERFACE_LANGUAGES)
 @lru_cache(maxsize=1)
 def catalogs():
     rows = json.loads((Path(__file__).parent / "locales" / "messages.json").read_text(encoding="utf-8"))
-    return {locale: {row[0]: row[index] for row in rows} for index, locale in enumerate(LOCALE_ORDER)}
+    return {
+        locale: {row[0]: row[index] if index < len(row) else row[1] for row in rows}
+        for index, locale in enumerate(LOCALE_ORDER)
+    }
 
 
 @lru_cache(maxsize=1)

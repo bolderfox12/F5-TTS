@@ -116,6 +116,12 @@ class CustomDataset(Dataset):
                 ),
             )
         self._resamplers = {}
+        self._mel_cache = {}
+        self._mel_cache_remaining = 0
+
+    def cache_mels_in_ram(self, byte_limit):
+        self._mel_cache = {}
+        self._mel_cache_remaining = byte_limit
 
     def get_frame_len(self, index):
         if (
@@ -140,6 +146,10 @@ class CustomDataset(Dataset):
 
             index = (index + 1) % len(self.data)
 
+        cached = self._mel_cache.get(index)
+        if cached is not None:
+            return {"mel_spec": cached, "text": text}
+
         if self.preprocessed_mel:
             mel_spec = torch.tensor(row["mel_spec"])
         else:
@@ -161,6 +171,10 @@ class CustomDataset(Dataset):
             mel_spec = self.mel_spectrogram(audio)
             mel_spec = mel_spec.squeeze(0)  # '1 d t -> d t'
 
+        cache_bytes = mel_spec.numel() * mel_spec.element_size()
+        if 0 < cache_bytes <= self._mel_cache_remaining:
+            self._mel_cache[index] = mel_spec
+            self._mel_cache_remaining -= cache_bytes
         return {
             "mel_spec": mel_spec,
             "text": text,
@@ -178,13 +192,20 @@ class DynamicBatchSampler(Sampler[list[int]]):
     """
 
     def __init__(
-        self, sampler: Sampler[int], frames_threshold: int, max_samples=0, random_seed=None, drop_residual: bool = False
+        self,
+        sampler: Sampler[int],
+        frames_threshold: int,
+        max_samples=0,
+        random_seed=None,
+        drop_residual: bool = False,
+        num_replicas: int = 1,
     ):
         self.sampler = sampler
         self.frames_threshold = frames_threshold
         self.max_samples = max_samples
         self.random_seed = random_seed
         self.epoch = 0
+        self.num_replicas = num_replicas
 
         indices, batches = [], []
         data_source = self.sampler.data_source
@@ -236,10 +257,16 @@ class DynamicBatchSampler(Sampler[list[int]]):
             batches = [self.batches[i] for i in indices]
         else:
             batches = self.batches
-        return iter(batches)
+        # Keep every rank in lockstep when dynamic batch counts are uneven.
+        if len(batches) < self.num_replicas:
+            return iter(())
+        padding = len(self) - len(batches)
+        return iter(batches + batches[:padding])
 
     def __len__(self):
-        return len(self.batches)
+        if len(self.batches) < self.num_replicas:
+            return 0
+        return len(self.batches) + (-len(self.batches) % self.num_replicas)
 
 
 # Load dataset
@@ -291,9 +318,7 @@ def load_dataset(
         with open(f"{dataset_name}/duration.json", "r", encoding="utf-8") as f:
             data_dict = json.load(f)
         durations = data_dict["duration"]
-        train_dataset = CustomDataset(
-            train_dataset, durations=durations, preprocessed_mel=preprocessed_mel, **mel_spec_kwargs
-        )
+        train_dataset = CustomDataset(train_dataset, durations=durations, **mel_spec_kwargs)
 
     elif dataset_type == "HFDataset":
         print(
