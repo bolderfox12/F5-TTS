@@ -109,16 +109,8 @@ The ordinary PyPI package name alone does not select this fork.
 
 ## Choose your interface language
 
-Use the language selector in the page header, labeled **Idioma da interface** in Portuguese
-and **Interface language** in English. Available languages:
-
-- English
-- Português (Brasil)
-- Español
-- Français
-- Deutsch
-- 简体中文 — Simplified Chinese
-- 日本語 — Japanese
+Use the language selector in the page header. Available languages include English, Brazilian
+Portuguese, Spanish, French, German, Simplified Chinese, and Japanese.
 
 The preference is saved in the workspace and applied when the page reloads. Menus, forms,
 notifications, the recorder, training controls, and built-in examples use local translations;
@@ -189,7 +181,8 @@ of this audio workflow.
 
 In **My models**, name your model, select its `.pt`, `.pth`, `.ckpt`, or `.safetensors` checkpoint,
 and provide the training `vocab.txt`. Choose the architecture used for training: F5-TTS v1 Base,
-F5-TTS Base, or E2-TTS Base. Leave the vocabulary blank only if training retained the original vocabulary.
+F5-TTS Base, F5-TTS Base · BigVGAN, or E2-TTS Base. Leave the vocabulary blank only if training
+retained the original vocabulary.
 
 You can upload the files or paste their paths. Windows paths such as `C:\Models\portuguese.pt`
 are supported under WSL. Uploaded models are stored in the workspace; pasted paths keep referring
@@ -218,7 +211,7 @@ it. A voice reference cannot be deleted while an existing story or narration use
 
 Open **Train a voice** to create or resume a project. Use an editable checkout for advanced
 training and BigVGAN so the project can use the base vocabulary and the NVIDIA submodule.
-See the [full training and troubleshooting guide](docs/guia-studio.md#treinamento-de-voz).
+A separate [Brazilian Portuguese guide](docs/guia-studio.md#treinamento-de-voz) covers the same workflow.
 
 1. **Data and transcripts.** Upload multiple recordings. Studio can transcribe and segment recordings
    with Whisper, or read a pasted manifest with one `filename.wav|transcript` per short file.
@@ -244,6 +237,13 @@ See the [full training and troubleshooting guide](docs/guia-studio.md#treinament
    download its INT8 weights and vocabulary from the library and register them on the other machine
    with the same architecture. This format needs an x86 PyTorch quantized backend and preserves the
    vocoder in its original precision.
+
+For a transcript manifest, enter one line per uploaded clip using its original filename.
+
+```text
+clip-01.wav|This is the first recording from the session.
+clip-02.wav|The second recording has a different intonation.
+```
 
 Use a fresh project to change base architecture, adjust the vocabulary after training, or fine-tune
 a prior checkpoint with different data. Resuming an existing run uses its saved optimizer and data
@@ -301,6 +301,19 @@ $env:HF_HUB_OFFLINE="1"
 $env:TRANSFORMERS_OFFLINE="1"
 .\.venv\Scripts\f5-tts_studio.exe
 ```
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| CUDA is unavailable | Confirm that `nvidia-smi` sees the GPU and that `torch.cuda.is_available()` returns `True` in the Studio environment. |
+| Too few batches for multi-GPU training | Try a smaller frame budget, more approved recordings, or a single GPU. |
+| GPU memory runs out | Reduce frames or examples per batch, then consider mixed precision, gradient accumulation, and F5-TTS activation recomputation. |
+| Host memory pressure | Lower the RAM cache limit or turn off the cache. With caching off, reduce data-loader workers if needed. |
+| Checkpoint and vocabulary do not match | Select the architecture and the vocabulary used by the checkpoint. Reprepare the approved dataset after changing the base vocabulary. |
+| BigVGAN is unavailable | Initialize the NVIDIA submodule from an editable checkout. |
+| An INT8 copy fails to load | Check for an x86 quantized PyTorch backend and use the original checkpoint architecture and vocabulary. |
+| Port 7862 is in use | Start with `f5-tts_studio --port 7870` and pass the workspace you want to open. |
 
 ## Validation and development
 
