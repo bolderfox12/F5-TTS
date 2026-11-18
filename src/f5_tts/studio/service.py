@@ -12,6 +12,7 @@ import time
 from collections import deque
 from datetime import datetime, timezone
 from importlib.resources import files
+from io import BytesIO
 from pathlib import Path, PureWindowsPath
 from uuid import uuid4
 
@@ -681,21 +682,32 @@ class StudioService(StoryTools, LocalTools):
         output_quality="standard",
         remove_noise=False,
         stereo=False,
+        *,
+        _part_directory=None,
+        _part_progress=None,
     ):
         if not text or not text.strip():
             raise ValueError("Escreva o texto que deseja transformar em voz.")
         if output_format not in ("wav", "mp3") or output_quality not in ("high", "standard", "compact"):
             raise ValueError("Escolha um formato e uma qualidade de áudio válidos.")
-        if not self._operation.acquire(blocking=False):
+        if _part_directory is None and not self._operation.acquire(blocking=False):
             raise ValueError("Aguarde a operação atual ou pare o treinamento antes de gerar áudio.")
-        self.set_generation_status(True, 1, "Validando texto e referência.")
+
+        def update_progress(running, percent, message):
+            if _part_progress is not None:
+                index, total = _part_progress
+                percent = (100 * index + percent) / total
+                message = f"Trecho {index + 1} de {total} · {message}"
+            self.set_generation_status(running, percent, message)
+
+        update_progress(True, 1, "Validando texto e referência.")
         try:
             data = self.read()
             if voice_id:
                 voice = next((v for v in data["voices"] if v["id"] == voice_id), None)
                 if not voice:
                     raise ValueError("Selecione uma voz existente.")
-                reference, transcript = voice["reference"], voice["transcript"]
+                reference, transcript = voice["reference"], transcript or voice["transcript"]
             reference = self.validate_reference(reference or "", allow_external=bool(voice_id))
             vocabulary = ""
             architecture = "F5TTS_v1_Base"
@@ -732,7 +744,7 @@ class StudioService(StoryTools, LocalTools):
                 self.model_version(vocabulary),
             )
             if self._model_key != key:
-                self.set_generation_status(True, 3, "Carregando modelo e vocoder.")
+                update_progress(True, 3, "Carregando modelo e vocoder.")
                 self._model = None
                 gc.collect()
                 if torch.cuda.is_available():
@@ -749,11 +761,11 @@ class StudioService(StoryTools, LocalTools):
                     device=None if settings["device"] == "auto" else settings["device"],
                 )
                 self._model_key = key
-            self.set_generation_status(True, 7, "Preparando a inferência.")
+            update_progress(True, 7, "Preparando a inferência.")
             identifier = uuid4().hex
-            path = self.outputs / (identifier + "." + output_format)
+            path = (_part_directory or self.outputs) / (identifier + "." + output_format)
             spoken_text = self.pronounce(text.strip(), data.get("pronunciations", {}))
-            progress = _InferenceProgress(self.set_generation_status)
+            progress = _InferenceProgress(update_progress)
             with tempfile.TemporaryDirectory(prefix="f5-studio-") as temp_dir:
                 source = Path(temp_dir) / "generated.wav"
                 self._model.infer(
@@ -769,7 +781,7 @@ class StudioService(StoryTools, LocalTools):
                 )
                 if not source.exists():
                     raise RuntimeError("O modelo não produziu o arquivo de áudio.")
-                self.set_generation_status(True, 92, "Finalizando e exportando o áudio.")
+                update_progress(True, 92, "Finalizando e exportando o áudio.")
                 self._export_generated_audio(source, path, output_format, output_quality, remove_noise, stereo)
             entry = {
                 "id": identifier,
@@ -793,15 +805,88 @@ class StudioService(StoryTools, LocalTools):
                 "rating": "",
                 "note": "",
             }
-            with self._storage:
-                data = self.read()
-                data["history"].insert(0, entry)
-                self.write(data)
-            self.set_generation_status(False, 100, "Geração concluída.")
+            if _part_directory is None:
+                self._save_generation(entry)
+            update_progress(_part_directory is not None, 100, "Geração concluída.")
             return entry
         except Exception:
             current = self.generation_status()
             self.set_generation_status(False, current["percent"], "A geração não foi concluída.")
+            raise
+        finally:
+            if _part_directory is None:
+                self._operation.release()
+
+    def _save_generation(self, entry):
+        with self._storage:
+            data = self.read()
+            data["history"].insert(0, entry)
+            self.write(data)
+
+    def generate_reference_turns(
+        self, parts, project, checkpoint, model_id, output_format, output_quality, noise_reduction, stereo
+    ):
+        if not 1 <= len(parts) <= 100:
+            raise ValueError("Separe o roteiro em 1 a 100 trechos.")
+        if output_format not in ("wav", "mp3") or output_quality not in ("high", "standard", "compact"):
+            raise ValueError("Escolha um formato e uma qualidade de áudio válidos.")
+        if not self._operation.acquire(blocking=False):
+            raise ValueError("Aguarde a operação atual ou pare o treinamento antes de gerar áudio.")
+        target = self.outputs / f"{uuid4().hex}.{output_format}"
+        try:
+            voices = {voice["id"]: voice for voice in self.read()["voices"]}
+            for part in parts:
+                voice_id = part.get("voice_id")
+                saved = voices.get(voice_id)
+                if voice_id and not saved:
+                    raise ValueError("Selecione uma voz existente.")
+                self.validate_reference(saved["reference"] if saved else part.get("reference"), bool(saved))
+            with tempfile.TemporaryDirectory(prefix="f5-studio-turns-") as folder:
+                directory = Path(folder)
+                joined = directory / "joined.wav"
+                with sf.SoundFile(joined, mode="w", samplerate=24000, channels=1, subtype="PCM_16") as audio:
+                    last = None
+                    spoken = []
+                    for index, part in enumerate(parts):
+                        if index:
+                            audio.write(np.zeros(7200, dtype=np.float32))
+                        last = self.generate(
+                            part["text"],
+                            part.get("reference"),
+                            part.get("transcript", ""),
+                            part.get("voice_id"),
+                            project,
+                            checkpoint,
+                            model_id,
+                            _part_directory=directory,
+                            _part_progress=(index, len(parts)),
+                        )
+                        samples, _ = sf.read(last["path"], dtype="float32")
+                        audio.write(samples)
+                        spoken.append(last["spoken_text"])
+                        Path(last["path"]).unlink()
+                self._export_generated_audio(joined, target, output_format, output_quality, noise_reduction, stereo)
+            entry = {
+                **last,
+                "id": target.stem,
+                "path": str(target),
+                "text": "\n\n".join(
+                    f"{part['speaker']}: {part['text']}" if part.get("speaker") else part["text"] for part in parts
+                ),
+                "spoken_text": "\n\n".join(spoken),
+                "voice": None,
+                "turn_count": len(parts),
+                "format": output_format,
+                "quality": output_quality,
+                "noise_reduction": bool(noise_reduction),
+                "stereo": bool(stereo),
+            }
+            self._save_generation(entry)
+            self.set_generation_status(False, 100, "Geração concluída.")
+            return entry
+        except Exception:
+            target.unlink(missing_ok=True)
+            self.set_generation_status(False, self.generation_status()["percent"], "A geração não foi concluída.")
             raise
         finally:
             self._operation.release()
@@ -944,26 +1029,82 @@ class StudioService(StoryTools, LocalTools):
             )
         return sorted(result, key=lambda item: item["modified"], reverse=True)
 
-    def audio_waveform(self, source, points=180):
+    def audio_waveform(self, source, points=180, analyze=False):
         """Return a compact peak envelope and duration for an audio-library preview."""
         path = self._managed_asset(source)
         info = sf.info(path)
         bucket_size = max(1, (info.frames + points - 1) // points)
         peaks = []
+        energy = clipped = samples = 0
+        levels = []
         with sf.SoundFile(path) as audio:
             while True:
                 block = audio.read(bucket_size, dtype="float32", always_2d=True)
                 if not len(block):
                     break
-                peaks.append(float(abs(block).max()))
+                peak_block = np.abs(block)
+                peaks.append(float(peak_block.max()))
+                if analyze:
+                    block_energy = np.square(block, dtype=np.float64).sum()
+                    energy += block_energy
+                    clipped += np.count_nonzero(peak_block >= 0.999)
+                    samples += block.size
+                    levels.append(np.sqrt(block_energy / block.size))
         peak = max(peaks, default=0.0)
         normalized = [round(value / peak, 4) if peak else 0.0 for value in peaks]
-        return {
+        result = {
             "duration": info.duration,
             "sample_rate": info.samplerate,
             "channels": info.channels,
             "peaks": normalized,
         }
+        if analyze:
+            rms = float(np.sqrt(energy / samples)) if samples else 0.0
+            rms_db = 20 * np.log10(max(rms, 1e-6))
+            clipping = 100 * clipped / max(samples, 1)
+            quiet_threshold = max(0.001, rms * 0.12)
+            quiet = sum(level < quiet_threshold for level in levels) / max(len(levels), 1)
+            checks = []
+            if info.duration < 1:
+                checks.append("too_short")
+            elif info.duration > 12:
+                checks.append("too_long")
+            if rms_db < -36:
+                checks.append("quiet")
+            if clipping >= 0.1:
+                checks.append("clipping")
+            if quiet > 0.35 and rms_db >= -36:
+                checks.append("silence")
+            if info.samplerate < 16000:
+                checks.append("sample_rate")
+            result["quality"] = {"rms_db": float(rms_db), "clipping": clipping, "checks": checks}
+        return result
+
+    def suggest_narration(self, text, api_key="", provider="gemini", model="", instructions=""):
+        if provider != "ollama" and self.read().get("offline", False):
+            raise ValueError("O modo offline está ativo. Use o Ollama local ou desative o modo offline.")
+        from f5_tts.studio.script_review import suggest_script
+
+        return suggest_script(text, api_key, provider, model, instructions)
+
+    def analyze_reference_with_gemini(self, source, api_key="", model=""):
+        if self.read().get("offline", False):
+            raise ValueError("O modo offline está ativo. Desative-o para analisar áudio com Gemini.")
+        source = self.validate_reference(str(self._managed_asset(source)), allow_external=True)
+        info = sf.info(source)
+        if info.frames * info.channels * 2 > 12_000_000:
+            raise ValueError("O áudio está grande demais para análise. Selecione um trecho mais curto.")
+        audio, rate = sf.read(source, dtype="float32", always_2d=True)
+        with BytesIO() as wav:
+            sf.write(wav, audio, rate, format="WAV", subtype="PCM_16")
+            from f5_tts.studio.script_review import analyze_gemini_reference
+
+            return analyze_gemini_reference(wav.getvalue(), api_key, model, self.interface_language())
+
+    def trim_reference(self, source, start, end):
+        if not 1 <= float(end) - float(start) <= 30:
+            raise ValueError("Use uma referência de 1 a 30 segundos; prefira até 12 segundos.")
+        return self.trim_audio(source, start, end)
 
     def trim_audio(self, source, start_seconds, end_seconds):
         """Save a selected time range as a new WAV in the Studio output library."""
@@ -971,7 +1112,7 @@ class StudioService(StoryTools, LocalTools):
         info = sf.info(source_path)
         start = float(start_seconds)
         end = float(end_seconds)
-        if start < 0 or end > info.duration or end - start < 0.05:
+        if not 0 <= start < end <= info.duration or end - start < 0.05:
             raise ValueError("Escolha um trecho válido de pelo menos 0,05 segundo.")
         first = max(0, int(start * info.samplerate))
         last = min(info.frames, int(end * info.samplerate))
@@ -981,7 +1122,8 @@ class StudioService(StoryTools, LocalTools):
         with sf.SoundFile(source_path) as audio:
             audio.seek(first)
             segment = audio.read(last - first, dtype="float32", always_2d=True)
-        sf.write(output, segment, info.samplerate, subtype=info.subtype)
+        subtype = info.subtype if info.subtype in sf.available_subtypes("WAV") else "PCM_16"
+        sf.write(output, segment, info.samplerate, subtype=subtype)
         result = {"path": str(output), "duration": len(segment) / info.samplerate, "size": output.stat().st_size}
         with self._storage:
             data = self.read()

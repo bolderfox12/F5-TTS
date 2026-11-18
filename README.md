@@ -134,6 +134,48 @@ you select it. Uploading an existing audio file remains available.
 
 Use `localhost` or `127.0.0.1` for microphone permission. Use clean speech without music.
 
+## Prepare a reference and review a script
+
+In **Create audio**, select a saved voice, record, or upload a reference. **Reference quality** checks
+duration, sample rate, recording level, and clipping, then suggests practical adjustments. Listen to
+the audio to check for background noise, echo, or overlapping speakers. Open **Listen to and trim
+the reference**, choose the start and end, and click **Use this clip** to select a separate WAV.
+**Transcribe reference** fills the editable transcript with local Whisper. The first transcription
+may download Whisper weights.
+
+Expand **Review script for F5-TTS** and choose Gemini, OpenAI, Claude, or local Ollama. The reviewer
+focuses on narration-friendly punctuation, pauses, and unambiguous pronunciations. **Suggest
+improvements** puts an editable suggestion below the script. **Use suggestion in script** copies it
+into the narration field. Enable **Suggest revisions before generating audio** to request a review
+when you click **Generate audio** with a new script.
+
+- **Cloud APIs.** Enter a key for the current page or configure `GEMINI_API_KEY`, `OPENAI_API_KEY`,
+  or `ANTHROPIC_API_KEY` in the Studio process environment. Requests send the script to the selected
+  provider. Reference audio and synthesis stay local. Studio's offline mode disables these APIs.
+- **Local Ollama.** Install and start [Ollama](https://ollama.com/download) on the Studio machine and
+  download a model, for example with `ollama pull qwen2.5:3b`. Select **Local Ollama**, click **Find
+  local models**, then choose the installed model. Studio uses the loopback Ollama server at
+  `http://127.0.0.1:11434` by default. Set `OLLAMA_HOST` for a different loopback port. Local review
+  works in Studio's offline mode after the model is downloaded.
+
+For a second opinion on a short clip, enable **Gemini reference analysis** and click **Analyze and
+transcribe with Gemini**. This explicitly sends the selected audio to Google and returns an assessment,
+practical tips, and an editable transcript. Click **Use Gemini transcript** to copy it into the reference
+field. The local analysis and Whisper remain available. Use a Gemini key from the script panel or
+`GEMINI_API_KEY`.
+
+Use **What would you like to change or add?** to request changes such as a shorter opening or new
+dialogue. The result appears under **Suggested script**. Review it and click **Use suggestion in script**
+to replace the current text.
+
+To assign voices or deliveries within one output, enable **Choose a reference for each part**. Separate
+plain paragraphs with blank lines, or write speaker lines such as `Ana: Let's start.` and
+`Bruno: I'm ready.`. Click **Split script into parts**. Each part can use the main reference, a saved
+voice, or a recording or upload of its own. Reuse a reference across a character's lines, then override
+individual lines as needed. For a different emotion, choose a clean reference of the same speaker
+recorded with that delivery. F5-TTS uses the recording as a style cue. The Studio joins the parts in
+order and exports one file with the selected output settings.
+
 ## Create a story with characters and different voices
 
 Open **Stories and characters**:

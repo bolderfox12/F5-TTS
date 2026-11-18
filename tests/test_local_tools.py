@@ -100,6 +100,17 @@ class LocalToolsTests(unittest.TestCase):
         self.assertEqual(Path(updated["txt"]).read_text(), "Hello everyone")
         self.assertFalse(self.service._operation.locked())
 
+    def test_trimmed_reference_can_be_transcribed_without_saving_a_transcript(self):
+        clipped = self.service.trim_reference(self.reference, 0.25, 1.5)
+        self.assertAlmostEqual(clipped["duration"], 1.25)
+        self.assertTrue(Path(self.reference).exists())
+        self.service._asr_factory = Mock(return_value={"text": "Selected words"})
+        self.assertEqual(self.service.transcribe_reference(clipped["path"]), "Selected words")
+        self.assertEqual(self.service.transcripts(), [])
+        self.assertNotIn("language", self.service._asr_factory.call_args.kwargs["generate_kwargs"])
+        with self.assertRaises(ValueError):
+            self.service.trim_reference(self.reference, 0, 0.25)
+
     def test_translation_keeps_original_and_subtitle_times(self):
         original = self.service.store_transcript(
             {

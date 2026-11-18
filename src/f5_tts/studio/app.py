@@ -10,6 +10,8 @@ from f5_tts.studio.i18n import INTERFACE_LANGUAGES
 from f5_tts.studio.local_pages import register_local_pages
 from f5_tts.studio.microphone import Microphone
 from f5_tts.studio.model_pages import register_model_pages
+from f5_tts.studio.reference_turns import reference_turn_editor
+from f5_tts.studio.script_review import local_review_models, preferred_review_model
 from f5_tts.studio.service import StudioService
 from f5_tts.studio.story_pages import register_story_pages
 from f5_tts.studio.training_pages import register_training_pages
@@ -129,12 +131,14 @@ def register_pages(service):
             ui.badge(t("Workspace local"), color="teal-1", text_color="teal-9")
         return ui.column().classes("w-full max-w-6xl mx-auto p-4 md:p-8 gap-6")
 
-    async def receive(event, paths, label):
+    async def receive(event, paths, label, on_reference=None):
         try:
             path = service.upload_path(event.file.name)
             await event.file.save(path)
             paths.append(str(path))
             label.set_text(t("{value_0} arquivo(s) enviado(s).", value_0=len(paths)))
+            if on_reference:
+                await on_reference()
         except Exception as error:
             ui.notify(t(str(error)), type="negative")
 
@@ -146,7 +150,7 @@ def register_pages(service):
                 if result:
                     paths.append(result)
                     if on_reference:
-                        on_reference()
+                        await on_reference()
                     label.set_text(t("Gravação do microfone selecionada como referência."))
                     ui.notify(t("Referência pronta para usar."), type="positive")
                 recorder.run_method("finish", result is not None)
@@ -159,7 +163,7 @@ def register_pages(service):
             auto_upload=True,
             max_file_size=100_000_000,
             max_files=100 if multiple else 1,
-            on_upload=lambda event: receive(event, paths, label),
+            on_upload=lambda event: receive(event, paths, label, on_reference),
             on_rejected=lambda: ui.notify(t("Arquivo recusado. O limite é 100 MB por arquivo."), type="warning"),
         ).props('accept=".wav,.mp3,.flac,.ogg,.m4a,.aac"').classes("w-full")
 
@@ -186,11 +190,214 @@ def register_pages(service):
                         t("Grave pelo microfone ou envie uma referência curta. Prefira até 12 segundos, sem música.")
                     ).classes("studio-muted")
                     upload_status = ui.label(t("Nenhum arquivo enviado.")).classes("text-sm")
-                    audio_upload(paths, upload_status, reference=True, on_reference=lambda: voice.set_value(None))
+                    saved_voices = {item["id"]: item for item in service.read()["voices"]}
+
+                    def active_reference():
+                        if voice.value:
+                            return saved_voices[voice.value]["reference"]
+                        return paths[-1] if paths else ""
+
+                    async def select_upload():
+                        if voice.value is not None:
+                            voice.set_value(None)
+                        else:
+                            await refresh_reference()
+
+                    audio_upload(paths, upload_status, reference=True, on_reference=select_upload)
                     reference_text = ui.textarea(
                         label=t("O que é dito na referência? (opcional)"),
                         placeholder=t("Vazio: transcrição automática."),
                     ).props("outlined rows=2")
+
+                    async def transcribe_reference():
+                        source = active_reference()
+                        previous_text = reference_text.value
+                        transcribe_button.disable()
+                        try:
+                            result = await action(service.transcribe_reference, source)
+                            if result and active_reference() == source and reference_text.value == previous_text:
+                                reference_text.set_value(result)
+                        finally:
+                            transcribe_button.set_enabled(bool(active_reference()))
+
+                    transcribe_button = ui.button(
+                        t("Transcrever referência"), icon="subtitles", on_click=transcribe_reference
+                    ).props("outline no-caps")
+                    transcribe_button.disable()
+
+                    with ui.column().classes("w-full gap-1") as reference_quality:
+                        ui.label(t("Qualidade da referência")).classes("font-semibold")
+                        quality_summary = ui.label("").classes("text-sm studio-muted")
+                        quality_tips = ui.column().classes("w-full gap-1")
+                    reference_quality.set_visibility(False)
+
+                    gemini_reference_enabled = ui.switch(t("Ativar análise da referência com Gemini"), value=False)
+                    with ui.column().classes("w-full gap-2") as gemini_reference_panel:
+                        ui.label(
+                            t(
+                                "Ao analisar com Gemini, este áudio será enviado ao Google. A análise local continua disponível."
+                            )
+                        ).classes("text-sm studio-muted")
+                        gemini_assessment = ui.column().classes("w-full gap-1")
+                        gemini_reference_status = ui.label("").classes("text-sm studio-muted")
+
+                        async def analyze_gemini():
+                            source = active_reference()
+                            if not gemini_reference_enabled.value or not source:
+                                return
+                            key = api_key.value if provider.value == "gemini" else session_keys.get("gemini", "")
+                            model = (
+                                cloud_model.value if provider.value == "gemini" else session_models.get("gemini", "")
+                            )
+                            gemini_reference_button.disable()
+                            gemini_assessment.clear()
+                            gemini_reference_status.set_text(t("Analisando referência com Gemini…"))
+                            try:
+                                result = await action(service.analyze_reference_with_gemini, source, key, model)
+                                if not result or active_reference() != source or not gemini_reference_enabled.value:
+                                    return
+                                with gemini_assessment:
+                                    ui.label(result["assessment"]).classes("font-medium")
+                                    for tip in result["tips"]:
+                                        ui.label(tip).classes("text-sm studio-muted")
+                                    if result["transcript"]:
+                                        suggested_transcript = (
+                                            ui.textarea(
+                                                t("Transcrição sugerida pelo Gemini"), value=result["transcript"]
+                                            )
+                                            .props("outlined rows=3")
+                                            .classes("w-full")
+                                        )
+
+                                        def use_gemini_transcript():
+                                            if active_reference() == source and gemini_reference_enabled.value:
+                                                reference_text.set_value(suggested_transcript.value)
+
+                                        ui.button(
+                                            t("Usar transcrição do Gemini"), on_click=use_gemini_transcript
+                                        ).props("flat no-caps")
+                            finally:
+                                gemini_reference_status.set_text("")
+                                gemini_reference_button.set_enabled(bool(active_reference()))
+
+                        gemini_reference_button = ui.button(
+                            t("Analisar e transcrever com Gemini"), icon="hearing", on_click=analyze_gemini
+                        ).props("outline no-caps")
+                        gemini_reference_button.disable()
+                        ui.label(
+                            t("Use a chave Gemini configurada na revisão do roteiro ou em GEMINI_API_KEY.")
+                        ).classes("text-sm studio-muted")
+                    gemini_reference_panel.bind_visibility_from(gemini_reference_enabled, "value")
+
+                    reference_editor = {"source": ""}
+                    with ui.expansion(t("Ouvir e recortar a referência"), icon="content_cut").classes("w-full"):
+                        reference_audio = ui.audio("").classes("w-full")
+                        reference_waveform = ui.echart(
+                            {
+                                "animation": False,
+                                "grid": {"left": 0, "right": 0, "top": 0, "bottom": 0},
+                                "xAxis": {"type": "category", "show": False, "data": []},
+                                "yAxis": {"type": "value", "show": False, "max": 1},
+                                "series": [
+                                    {"type": "bar", "data": [], "barWidth": "100%", "itemStyle": {"color": "#137d80"}}
+                                ],
+                            }
+                        ).classes("w-full h-16")
+                        reference_waveform.set_visibility(False)
+                        clip = ui.range(min=0, max=1, step=0.01).props("label-always").classes("w-full")
+                        reference_hint = ui.label(t("Selecione uma referência para escolher o trecho.")).classes(
+                            "text-sm studio-muted"
+                        )
+
+                        async def use_clip():
+                            source = active_reference()
+                            if not source or reference_editor["source"] != source:
+                                return
+                            selection = clip.value.copy()
+                            trim_button.disable()
+                            try:
+                                result = await action(
+                                    service.trim_reference, source, selection["min"], selection["max"]
+                                )
+                                if result and active_reference() == source:
+                                    paths.append(result["path"])
+                                    await select_upload()
+                                    upload_status.set_text(t("Recorte selecionado como referência."))
+                            finally:
+                                trim_button.set_enabled(
+                                    bool(reference_editor["source"])
+                                    and reference_editor["source"] == active_reference()
+                                )
+
+                        trim_button = ui.button(t("Usar só este trecho"), icon="content_cut", on_click=use_clip).props(
+                            "no-caps unelevated"
+                        )
+                        trim_button.disable()
+
+                    async def refresh_reference():
+                        source = active_reference()
+                        reference_editor["source"] = ""
+                        gemini_assessment.clear()
+                        gemini_reference_button.set_enabled(bool(source))
+                        saved = saved_voices.get(voice.value, {})
+                        reference_text.set_value(saved.get("transcript", ""))
+                        reference_audio.set_source(source)
+                        reference_waveform.set_visibility(False)
+                        reference_quality.set_visibility(False)
+                        trim_button.disable()
+                        transcribe_button.set_enabled(bool(source))
+                        if not source:
+                            reference_hint.set_text(t("Selecione uma referência para escolher o trecho."))
+                            return
+                        waveform = await action(service.audio_waveform, source, 180, True)
+                        if waveform and active_reference() == source:
+                            duration = waveform["duration"]
+                            quality = waveform["quality"]
+                            quality_summary.set_text(
+                                t(
+                                    "{duration} s · {rate} Hz · RMS {rms} dBFS · clipping {clipping}%",
+                                    duration=f"{duration:.2f}",
+                                    rate=waveform["sample_rate"],
+                                    rms=f"{quality['rms_db']:.1f}",
+                                    clipping=f"{quality['clipping']:.2f}",
+                                )
+                            )
+                            tips = {
+                                "too_short": t("Grave pelo menos um segundo de fala contínua."),
+                                "too_long": t("Recorte uma frase completa. Prefira uma referência de até 12 segundos."),
+                                "quiet": t("O volume está baixo. Aproxime o microfone e grave com volume natural."),
+                                "clipping": t("Há sinais de saturação. Reduza o ganho do microfone e grave novamente."),
+                                "silence": t(
+                                    "Há muitos trechos silenciosos. Recorte a fala e mantenha as pausas naturais."
+                                ),
+                                "sample_rate": t(
+                                    "A taxa de amostragem é baixa. Se possível, regrave em 24 kHz ou mais."
+                                ),
+                            }
+                            quality_tips.clear()
+                            with quality_tips:
+                                for check in quality["checks"]:
+                                    ui.label(tips[check]).classes("text-sm text-orange-900")
+                                if not quality["checks"]:
+                                    ui.label(t("Duração e nível adequados para testar no F5-TTS.")).classes(
+                                        "text-sm text-teal-900"
+                                    )
+                                ui.label(
+                                    t("Ouça e confira se há uma só voz, sem música, eco ou ruído de fundo.")
+                                ).classes("text-sm studio-muted")
+                            reference_quality.set_visibility(True)
+                            peaks = waveform["peaks"]
+                            reference_waveform.options["xAxis"]["data"] = list(range(len(peaks)))
+                            reference_waveform.options["series"][0]["data"] = peaks
+                            reference_waveform.update()
+                            reference_waveform.set_visibility(True)
+                            reference_editor["source"] = source
+                            clip.max = duration
+                            clip.set_value({"min": 0, "max": min(duration, 12)})
+                            reference_hint.set_text(t("Arraste o início e o fim. O recorte é salvo como um novo WAV."))
+                            trim_button.enable()
+
+                    voice.on_value_change(refresh_reference)
                     saved_model = ui.select(
                         service.model_choices(),
                         value="original",
@@ -231,6 +438,175 @@ def register_pages(service):
                     text = ui.textarea(
                         label=t("Texto para narrar"), placeholder=t("Digite ou cole seu texto aqui…")
                     ).props("outlined rows=7")
+                    review_state = {"busy": False, "reviewed": None, "pending": None}
+                    with ui.expansion(t("Revisar roteiro para F5-TTS"), icon="edit_note").classes(
+                        "w-full"
+                    ) as review_panel:
+                        provider = ui.select(
+                            {
+                                "gemini": "Gemini",
+                                "openai": "OpenAI",
+                                "anthropic": "Claude",
+                                "ollama": t("Ollama local"),
+                            },
+                            label=t("Provedor de revisão"),
+                            value="gemini",
+                        ).props("outlined")
+                        with ui.column().classes("w-full") as cloud_settings:
+                            ui.label(
+                                t("APIs externas recebem o roteiro. O áudio de referência fica no Studio.")
+                            ).classes("text-sm studio-muted")
+                            key_links = {
+                                "gemini": "https://aistudio.google.com/apikey",
+                                "openai": "https://platform.openai.com/api-keys",
+                                "anthropic": "https://platform.claude.com/settings/keys",
+                            }
+                            key_link = ui.link(t("Obter chave da API"), key_links["gemini"], new_tab=True)
+                            cloud_model = ui.input(
+                                t("Modelo de revisão"), value=preferred_review_model("gemini")
+                            ).props("outlined")
+                            api_key = ui.input(t("Chave da API nesta sessão"), password=True).props("outlined")
+                            session_keys = {}
+                            session_models = {}
+                            current_provider = "gemini"
+
+                        with ui.column().classes("w-full") as local_settings:
+                            ui.label(
+                                t("Inicie o Ollama nesta máquina e instale um modelo para revisar sem API externa.")
+                            ).classes("text-sm studio-muted")
+                            local_model = ui.select([], label=t("Modelo local instalado")).props("outlined")
+                            ui.link("Ollama", "https://ollama.com/download", new_tab=True)
+
+                            async def load_local_models():
+                                available = await action(local_review_models)
+                                if available is not None:
+                                    selected = local_model.value or preferred_review_model("ollama")
+                                    local_model.set_options(available)
+                                    local_model.set_value(
+                                        selected if selected in available else next(iter(available), None)
+                                    )
+                                    if not available:
+                                        ui.notify(t("Instale um modelo no Ollama e atualize a lista."), type="warning")
+
+                            ui.button(t("Buscar modelos locais"), icon="refresh", on_click=load_local_models).props(
+                                "flat no-caps"
+                            )
+                        local_settings.set_visibility(False)
+                        extra_instructions = (
+                            ui.textarea(
+                                t("O que você quer mudar ou acrescentar?"),
+                                placeholder=t("Exemplo: adicione uma abertura breve e deixe as falas mais naturais."),
+                            )
+                            .props("outlined rows=3")
+                            .classes("w-full")
+                        )
+                        automatic_review = ui.switch(t("Sugerir revisão antes de gerar áudio"), value=False)
+                        review_status = ui.label("").classes("text-sm studio-muted")
+
+                        def review_identity():
+                            local = provider.value == "ollama"
+                            model = local_model.value if local else cloud_model.value
+                            return (
+                                (text.value or "").strip(),
+                                provider.value,
+                                (model or "").strip(),
+                                (extra_instructions.value or "").strip(),
+                            )
+
+                        def switch_provider():
+                            nonlocal current_provider
+                            if current_provider != "ollama":
+                                session_keys[current_provider] = api_key.value
+                                session_models[current_provider] = cloud_model.value
+                            current_provider = provider.value
+                            local = current_provider == "ollama"
+                            cloud_settings.set_visibility(not local)
+                            local_settings.set_visibility(local)
+                            if not local:
+                                key_link.props(f'href="{key_links[current_provider]}"')
+                                cloud_model.set_value(
+                                    session_models.get(current_provider) or preferred_review_model(current_provider)
+                                )
+                                api_key.set_value(session_keys.get(current_provider, ""))
+
+                        provider.on_value_change(switch_provider)
+
+                        async def review_script():
+                            if review_state["busy"]:
+                                return False
+                            identity = review_identity()
+                            source, selected_provider, model, instructions = identity
+                            review_state["busy"] = True
+                            review_state["pending"] = None
+                            suggestion.set_visibility(False)
+                            suggest_button.disable()
+                            review_status.set_text(t("Preparando sugestão para o F5-TTS…"))
+                            try:
+                                result = await action(
+                                    service.suggest_narration,
+                                    source,
+                                    "" if selected_provider == "ollama" else api_key.value,
+                                    selected_provider,
+                                    model,
+                                    instructions,
+                                )
+                            finally:
+                                review_state["busy"] = False
+                                suggest_button.enable()
+                                review_status.set_text("")
+                            if not result or review_identity() != identity:
+                                return False
+                            if result == source:
+                                review_state["reviewed"] = identity
+                                review_status.set_text(t("A revisão manteve o roteiro original."))
+                                return True
+                            review_state["pending"] = identity
+                            revised_text.set_value(result)
+                            suggestion.set_visibility(True)
+                            review_panel.open()
+                            return False
+
+                        suggest_button = ui.button(
+                            t("Sugerir melhorias"), icon="auto_fix_high", on_click=review_script
+                        ).props("outline no-caps")
+
+                    with ui.column().classes("w-full gap-2") as suggestion:
+                        revised_text = ui.textarea(t("Roteiro sugerido")).props("outlined rows=5").classes("w-full")
+
+                        def finish_review(apply_suggestion):
+                            current = review_identity()
+                            if current != review_state["pending"]:
+                                ui.notify(t("O roteiro ou o modelo mudou. Solicite uma nova sugestão."), type="warning")
+                            else:
+                                revised = (revised_text.value or "").strip()
+                                if apply_suggestion:
+                                    if not revised:
+                                        return
+                                    text.set_value(revised)
+                                    current = (revised, *current[1:])
+                                review_state["reviewed"] = current
+                            review_state["pending"] = None
+                            suggestion.set_visibility(False)
+
+                        with ui.row():
+                            ui.button(t("Manter original"), on_click=lambda: finish_review(False)).props("flat no-caps")
+                            ui.button(t("Usar sugestão no roteiro"), on_click=lambda: finish_review(True)).props(
+                                "no-caps"
+                            )
+                    suggestion.set_visibility(False)
+
+                    reference_turns_enabled, selected_reference_turns = reference_turn_editor(
+                        t,
+                        text,
+                        voices,
+                        audio_upload,
+                        lambda: {
+                            "reference": paths[-1] if paths else None,
+                            "voice_id": voice.value,
+                            "transcript": reference_text.value,
+                        },
+                    )
+
                     ui.label(t("03 / Saída do áudio")).classes("font-semibold text-lg")
                     with ui.row().classes("w-full items-start gap-4 flex-wrap"):
                         output_format = (
@@ -285,14 +661,12 @@ def register_pages(service):
 
                     async def generate():
                         button.disable()
-                        status.set_text(t("Gerando… No primeiro uso, os modelos serão baixados. Aguarde."))
                         try:
-                            result = await action(
-                                service.generate,
-                                text.value,
-                                paths[-1] if paths else None,
-                                reference_text.value,
-                                voice.value,
+                            if automatic_review.value and review_state["reviewed"] != review_identity():
+                                if review_state["pending"] == review_identity() or not await review_script():
+                                    return
+                            status.set_text(t("Gerando… No primeiro uso, os modelos serão baixados. Aguarde."))
+                            settings = (
                                 trained_project.value,
                                 trained_checkpoint.value,
                                 saved_model.value,
@@ -301,6 +675,22 @@ def register_pages(service):
                                 remove_noise.value,
                                 stereo.value,
                             )
+                            if reference_turns_enabled.value:
+                                try:
+                                    parts = selected_reference_turns()
+                                except ValueError as error:
+                                    status.set_text(t(str(error)))
+                                    return
+                                result = await action(service.generate_reference_turns, parts, *settings)
+                            else:
+                                result = await action(
+                                    service.generate,
+                                    text.value,
+                                    paths[-1] if paths else None,
+                                    reference_text.value,
+                                    voice.value,
+                                    *settings,
+                                )
                             if result:
                                 generated.update(result)
                                 player.set_source(result["path"])

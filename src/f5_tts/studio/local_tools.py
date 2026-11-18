@@ -345,9 +345,15 @@ class LocalTools:
             torch.cuda.empty_cache()
 
     def transcribe_audio(self, source, language="pt", model_id="openai/whisper-small"):
+        return self._transcribe_audio(str(self.managed_upload(source)), language, model_id, save_record=True)
+
+    def transcribe_reference(self, source):
+        source = self.validate_reference(str(self._managed_asset(source)), allow_external=True)
+        return self._transcribe_audio(source, "", "openai/whisper-small", save_record=False)
+
+    def _transcribe_audio(self, source, language, model_id, *, save_record):
         if model_id not in ASR_MODELS:
             raise ValueError("Escolha um modelo de transcrição da lista.")
-        source = str(self.managed_upload(source))
         if language and language not in LANGUAGES:
             raise ValueError("Idioma não suportado pelo seletor.")
         if not self._operation.acquire(blocking=False):
@@ -395,6 +401,8 @@ class LocalTools:
                     segments.append({"start": start, "end": end, "text": chunk["text"].strip()})
             if not segments:
                 raise ValueError("Não foi reconhecida fala. Confira o arquivo e o idioma.")
+            if not save_record:
+                return " ".join(segment["text"] for segment in segments)
             return self.store_transcript(
                 {
                     "source": source,

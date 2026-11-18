@@ -156,3 +156,31 @@ class StoryTools:
             project["mix"] = None
             self.write(data)
         return self.narration(project_id)
+
+
+def split_reference_turns(script):
+    """Split blank-line paragraphs and Speaker: lines while preserving their order."""
+    turns, lines = [], []
+    speaker = ""
+
+    def flush():
+        text = "\n".join(lines).strip()
+        if text:
+            turns.append({"speaker": speaker, "text": text})
+        lines.clear()
+
+    for line in (script or "").splitlines():
+        line = line.strip()
+        if not line:
+            flush()
+            continue
+        match = re.match(r"^([\w][\w .()'’-]{0,59})[:：]\s*(.*)$", line)
+        if match:
+            flush()
+            speaker, line = match.groups()
+            speaker = speaker.strip()
+        lines.append(line)
+    flush()
+    if not 1 <= len(turns) <= 100:
+        raise ValueError("Separe o roteiro em 1 a 100 trechos.")
+    return turns

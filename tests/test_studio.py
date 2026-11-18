@@ -3,6 +3,7 @@
 import base64
 import http.client
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -12,10 +13,12 @@ import threading
 import time
 import unittest
 from copy import copy
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import httpx
 import numpy as np
 import soundfile as sf
 import torch
@@ -26,6 +29,7 @@ from f5_tts.audio import load_audio, save_audio
 from f5_tts.model.dataset import load_dataset
 from f5_tts.model.quantization import export_int8, int8_engine, is_int8_checkpoint, load_int8
 from f5_tts.studio.service import StudioService
+from f5_tts.studio.story_tools import split_reference_turns
 from f5_tts.train.studio_dataset import read_vocabulary
 
 
@@ -177,6 +181,167 @@ class StudioTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.service.settings("cuda", 32, 1)
             self.assertFalse(self.service.hardware()["cuda"])
+
+    def test_gemini_review_uses_only_script_and_preserves_incomplete_responses(self):
+        candidates = {
+            "candidates": [
+                {
+                    "finishReason": "STOP",
+                    "content": {
+                        "parts": [
+                            {"text": "Hidden", "thought": True},
+                            {"text": "Hello, everyone."},
+                        ]
+                    },
+                }
+            ]
+        }
+        with (
+            patch.dict(os.environ, {"GEMINI_MODEL": "gemini-3.5-flash-lite"}),
+            patch("f5_tts.studio.script_review.httpx.post") as request,
+        ):
+            request.return_value = httpx.Response(
+                200, json=candidates, request=httpx.Request("POST", "https://example.com")
+            )
+            self.assertEqual(self.service.suggest_narration("Hello everyone", "key-here"), "Hello, everyone.")
+            kwargs = request.call_args.kwargs
+            self.assertEqual(kwargs["headers"], {"x-goog-api-key": "key-here"})
+            self.assertEqual(kwargs["json"]["contents"], [{"role": "user", "parts": [{"text": "Hello everyone"}]}])
+            candidates["candidates"][0]["finishReason"] = "MAX_TOKENS"
+            request.return_value = httpx.Response(
+                200, json=candidates, request=httpx.Request("POST", "https://example.com")
+            )
+            with self.assertRaisesRegex(ValueError, "não voltou completa"):
+                self.service.suggest_narration("Hello everyone", "key-here")
+
+    def test_cloud_review_providers_and_offline_ollama(self):
+        responses = [
+            (
+                "openai",
+                "https://api.openai.com/v1/responses",
+                {
+                    "status": "completed",
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [
+                                {"type": "output_text", "text": "Hello, everyone."},
+                            ],
+                        }
+                    ],
+                },
+            ),
+            (
+                "anthropic",
+                "https://api.anthropic.com/v1/messages",
+                {
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "Hello, everyone."}],
+                },
+            ),
+        ]
+        with patch("f5_tts.studio.script_review.httpx.post") as request:
+            for provider, url, data in responses:
+                with self.subTest(provider=provider):
+                    request.return_value = httpx.Response(200, json=data, request=httpx.Request("POST", url))
+                    self.assertEqual(
+                        self.service.suggest_narration("Hello everyone", "my-key", provider), "Hello, everyone."
+                    )
+                    self.assertEqual(request.call_args.args[0], url)
+            state = self.service.read()
+            state["offline"] = True
+            self.service.write(state)
+            with self.assertRaisesRegex(ValueError, "offline"):
+                self.service.suggest_narration("Hello everyone", "my-key", "openai")
+        with (
+            patch.dict(os.environ, {"OLLAMA_HOST": "127.0.0.1:11434"}),
+            patch("f5_tts.studio.script_review.httpx.Client") as client,
+        ):
+            local = client.return_value.__enter__.return_value
+            local.get.return_value.json.return_value = {
+                "models": [{"name": "test:latest"}, {"name": "remote:cloud"}],
+            }
+            local.post.return_value.json.return_value = {
+                "done": True,
+                "done_reason": "stop",
+                "message": {"content": "Hello, everyone."},
+            }
+            self.assertEqual(
+                self.service.suggest_narration("Hello everyone", "", "ollama", "test:latest"), "Hello, everyone."
+            )
+            self.assertEqual(local.post.call_args.args[0], "http://127.0.0.1:11434/api/chat")
+            with self.assertRaisesRegex(ValueError, "modelo instalado"):
+                self.service.suggest_narration("Hello everyone", "", "ollama", "remote:cloud")
+
+    def test_reference_quality_flags_quiet_audio_and_clipping(self):
+        samples = np.arange(16000, dtype=np.float32)
+        for amplitude, tip in ((0.0005, "quiet"), (1.5, "clipping")):
+            with self.subTest(tip=tip):
+                source = self.service.upload_path("assessment.wav")
+                sf.write(source, amplitude * np.sin(samples), 8000)
+                result = self.service.audio_waveform(source, analyze=True)
+                self.assertEqual(result["duration"], 2)
+                self.assertIn(tip, result["quality"]["checks"])
+                self.assertIn("sample_rate", result["quality"]["checks"])
+
+    def test_gemini_reference_request_contains_audio_and_separates_transcript_and_tips(self):
+        reply = {"transcript": "Hello world", "assessment": "One clear voice", "tips": ["Trim the end"]}
+        response = {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": json.dumps(reply)}]}}]}
+        with patch("f5_tts.studio.script_review.httpx.post") as request:
+            request.return_value = httpx.Response(
+                200, json=response, request=httpx.Request("POST", "https://example.com")
+            )
+            self.assertEqual(self.service.analyze_reference_with_gemini(self.reference, "test-key"), reply)
+            sent = request.call_args.kwargs["json"]["contents"][0]["parts"][1]["inlineData"]
+            self.assertEqual(sent["mimeType"], "audio/wav")
+            self.assertEqual(sf.info(BytesIO(base64.b64decode(sent["data"]))).duration, 2)
+            request.reset_mock()
+            state = self.service.read()
+            state["offline"] = True
+            self.service.write(state)
+            with self.assertRaisesRegex(ValueError, "offline"):
+                self.service.analyze_reference_with_gemini(self.reference, "test-key")
+            request.assert_not_called()
+
+    def test_gemini_revision_sends_extra_editing_instructions(self):
+        data = {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": "New introduction"}]}}]}
+        with patch("f5_tts.studio.script_review.httpx.post") as request:
+            request.return_value = httpx.Response(200, json=data, request=httpx.Request("POST", "https://example.com"))
+            self.assertEqual(
+                self.service.suggest_narration("", "test-key", "gemini", "", "Write an opening."), "New introduction"
+            )
+            content = request.call_args.kwargs["json"]["contents"][0]["parts"][0]["text"]
+            self.assertEqual(json.loads(content), {"editing_instructions": "Write an opening.", "script": ""})
+
+    def test_segmented_audio_uses_each_reference_and_saves_one_joined_file(self):
+        second = self.service.upload_path("second.wav")
+        sf.write(second, np.ones(48000) * 0.2, 24000)
+        voice = self.service.save_voice("Bruno, calm", second, "I speak calmly")
+        parts = split_reference_turns("Ana: First part.\nBruno: Second part.")
+        parts[0].update(reference=str(self.reference), transcript="I sound excited")
+        parts[1].update(voice_id=voice["id"])
+        calls = []
+        original = FakeModel.infer
+
+        def capture(model, **kwargs):
+            calls.append((kwargs["ref_file"], kwargs["ref_text"], kwargs["gen_text"]))
+            original(model, **kwargs)
+
+        with patch.object(FakeModel, "infer", capture):
+            result = self.service.generate_reference_turns(
+                parts, None, None, "original", "wav", "standard", False, False
+            )
+        self.assertEqual(
+            calls,
+            [
+                (str(self.reference), "I sound excited", "First part."),
+                (str(second), "I speak calmly", "Second part."),
+            ],
+        )
+        self.assertEqual(result["turn_count"], 2)
+        self.assertAlmostEqual(sf.info(result["path"]).duration, 2.3)
+        self.assertEqual([entry["id"] for entry in self.service.read()["history"]], [result["id"]])
+        self.assertFalse(self.service._operation.locked())
 
     def test_training_requires_current_preparation(self):
         with self.assertRaises(ValueError):
