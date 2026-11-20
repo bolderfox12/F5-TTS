@@ -6,6 +6,8 @@ from pathlib import Path
 
 from nicegui import run, ui
 
+from f5_tts.studio.gemini_tips import gemini_tips, training_context_json
+
 
 def register_training_pages(service, shell, action, audio_upload):
     t = service.translate_ui
@@ -520,6 +522,15 @@ def register_training_pages(service, shell, action, audio_upload):
                             result = await action(service.save_training_options, state["project"], collect_options())
                             if result:
                                 ui.notify(t("Configuração salva neste projeto."), type="positive")
+
+                        async def collect_training_tips(_topic):
+                            return await training_context_json(
+                                service,
+                                project=state["project"],
+                                options=collect_options() if state["project"] else None,
+                            )
+
+                        gemini_tips(service, collect_training_tips, topics=("training",))
 
                         async def start_training():
                             if not state["project"]:

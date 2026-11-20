@@ -1,10 +1,14 @@
 """User-facing local tools, without API keys or paid providers."""
 
 from pathlib import Path
+from threading import Event
 
 from nicegui import ui
 
+from f5_tts.studio import chatterbox_backend as chatterbox
+from f5_tts.studio.audio_timeline import AudioTimeline
 from f5_tts.studio.i18n import localized_options
+from f5_tts.studio.music_preview import music_preview
 
 
 LANGUAGES = {"pt": "Português", "en": "Inglês", "es": "Espanhol", "fr": "Francês", "de": "Alemão"}
@@ -406,6 +410,12 @@ def register_local_pages(service, shell, action, audio_upload):
                     value="original",
                     label=t("Modelo para regravar"),
                 ).props("outlined")
+                chatterbox_language = ui.select(
+                    chatterbox.LANGUAGES,
+                    value=chatterbox.DEFAULT_LANGUAGE,
+                    label=t("Idioma do Chatterbox"),
+                ).props("outlined")
+                chatterbox_language.set_visibility(False)
                 ui.link(t("Cadastrar outro modelo"), "/models").classes("text-sm")
                 trained_model = ui.select(
                     service.projects(), label=t("Usar um projeto treinado (opcional)"), clearable=True
@@ -421,40 +431,74 @@ def register_local_pages(service, shell, action, audio_upload):
                         trained_version.set_options({version: Path(version).name for version in versions})
 
                 trained_model.on_value_change(choose_version)
-                saved_model.on_value_change(
-                    lambda: trained_model.set_value(None) if saved_model.value != "original" else None
-                )
-                ui.label(
+                f5_model_tip = ui.label(
                     t(
                         "A qualidade e o idioma da voz dependem do checkpoint F5-TTS. Os modelos originais são voltados a inglês e chinês."
                     )
                 ).classes("studio-muted text-sm")
 
+                def choose_model(event):
+                    if event.value != "original":
+                        trained_model.set_value(None)
+                    using_chatterbox = event.value == chatterbox.MODEL_ID
+                    chatterbox_language.set_visibility(using_chatterbox)
+                    f5_model_tip.set_visibility(not using_chatterbox)
+
+                saved_model.on_value_change(choose_model)
+                cancel_event = None
+
+                def cancel_synthesis():
+                    if cancel_event is not None:
+                        cancel_event.set()
+                        cancel_button.disable()
+
                 async def generate():
+                    nonlocal cancel_event
                     if not voice.value:
                         ui.notify(t("Escolha uma voz salva."), type="warning")
                         return
-                    result = await action(
-                        service.generate,
-                        text.value,
-                        None,
-                        "",
-                        voice.value,
-                        trained_model.value,
-                        trained_version.value,
-                        saved_model.value,
-                    )
+                    cancel_event = Event()
+                    generate_button.disable()
+                    cancel_button.enable()
+                    cancel_button.set_visibility(True)
+                    try:
+                        result = await action(
+                            service.generate,
+                            text.value,
+                            None,
+                            "",
+                            voice.value,
+                            trained_model.value,
+                            trained_version.value,
+                            saved_model.value,
+                            language=chatterbox_language.value,
+                            cancel_event=cancel_event,
+                        )
+                        if not result and cancel_event.is_set():
+                            ui.notify(t("Síntese cancelada."))
+                    finally:
+                        cancel_event = None
+                        cancel_button.set_visibility(False)
+                        generate_button.enable()
                     if result:
                         state["output"] = result
-                        player.set_source(result["path"])
+                        await player.load(result["path"], service.audio_waveform)
+                        await preview_narration(result["path"])
                         download.enable()
 
-                ui.button(t("Gerar nova narração"), icon="record_voice_over", on_click=generate).props("no-caps")
-                player = ui.audio("").classes("w-full")
+                generate_button = ui.button(
+                    t("Gerar nova narração"), icon="record_voice_over", on_click=generate
+                ).props("no-caps")
+                cancel_button = ui.button(t("Cancelar síntese"), icon="stop", on_click=cancel_synthesis).props(
+                    "outline no-caps color=negative"
+                )
+                cancel_button.set_visibility(False)
+                player = AudioTimeline(t).classes("w-full")
                 download = ui.button(
                     t("Baixar WAV"), icon="download", on_click=lambda: ui.download.file(state["output"]["path"])
                 ).props("flat no-caps")
                 download.disable()
+                preview_narration = music_preview(service, t, action)
 
     @ui.page("/audio-tools")
     def audio_tools_page():

@@ -54,6 +54,34 @@ e do vocoder. Whisper e NLLB usam caches próprios dentro do cache de modelos do
 Uma voz salva reúne a referência e a transcrição. O modelo selecionado determina os pesos usados
 para sintetizar o áudio e influencia a pronúncia do idioma.
 
+### Chatterbox Multilingual V3 com Python 3.15
+
+Na raiz do F5-TTS, crie um ambiente Python 3.15 no workspace do Studio e instale o
+[Chatterbox oficial](https://github.com/resemble-ai/chatterbox) a partir do código-fonte:
+
+```bash
+python3.15 -m venv .studio/chatterbox/.venv
+.studio/chatterbox/.venv/bin/python -m pip install --upgrade pip
+.studio/chatterbox/.venv/bin/python -m pip install \
+  "torch==2.15.0" "torchaudio==2.11.1" --index-url https://download.pytorch.org/whl/cpu
+.studio/chatterbox/.venv/bin/python -m pip install \
+  "chatterbox-tts @ git+https://github.com/resemble-ai/chatterbox.git@master"
+.studio/chatterbox/.venv/bin/python -m pip check
+.studio/chatterbox/.venv/bin/python -c "from chatterbox.mtl_tts import ChatterboxMultilingualTTS"
+```
+
+O exemplo instala PyTorch para CPU. Para CUDA, use o índice do PyTorch adequado à sua GPU.
+O exemplo usa o workspace de `./iniciar-studio.sh`. Com outro `--workspace`, crie o
+ambiente em `chatterbox/.venv` dentro dele. No Windows, use `py -3.15` para criar o
+ambiente e `Scripts/python.exe` para executar os comandos dentro dele.
+
+Em **Criar áudio** e **Regravar com outra voz**, escolha **Chatterbox Multilingual V3** e o idioma do texto.
+Em **Histórias e personagens**, o modelo e o idioma são escolhidos por personagem.
+Use uma referência de voz no mesmo idioma do texto. O primeiro uso baixa os pesos
+do Hugging Face. O Chatterbox usa a configuração de dispositivo do Studio e seus
+próprios parâmetros de síntese. A transcrição da referência, os passos de inferência
+e a velocidade são usados pelo F5-TTS.
+
 ## Treinamento de voz
 
 Abra **Treinar uma voz** e crie ou selecione um projeto. Para comparar experimentos, mantenha

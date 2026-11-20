@@ -16,6 +16,7 @@ import torch
 import torchaudio
 
 from f5_tts.audio import local_audio_input
+from f5_tts.studio import chatterbox_backend as chatterbox
 
 
 LANGUAGES = {"pt": "por_Latn", "en": "eng_Latn", "es": "spa_Latn", "fr": "fra_Latn", "de": "deu_Latn"}
@@ -189,7 +190,11 @@ class LocalTools:
         if block.get("model_project"):
             vocabulary = self.project_vocabulary(block["model_project"])
             payload["vocabulary_version"] = self.model_version(vocabulary)
-        if block.get("model_id", "original") != "original":
+        if block.get("model_id") == chatterbox.MODEL_ID:
+            payload.update(model_id=chatterbox.MODEL_ID, language=block.get("language", chatterbox.DEFAULT_LANGUAGE))
+            payload.pop("steps")
+            payload.pop("speed")
+        elif block.get("model_id", "original") != "original":
             model = next((m for m in data.get("models", []) if m["id"] == block["model_id"]), None)
             payload["registered_model"] = model
             payload["model_version"] = (
@@ -211,6 +216,7 @@ class LocalTools:
             project=block.get("model_project"),
             checkpoint=block.get("checkpoint"),
             model_id=block.get("model_id", "original"),
+            language=block.get("language", chatterbox.DEFAULT_LANGUAGE),
         )
         signature = self.block_signature(
             block,

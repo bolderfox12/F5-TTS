@@ -7,10 +7,12 @@ import tempfile
 import unittest
 from pathlib import Path
 from string import Formatter
+from unittest.mock import patch
 
 import numpy as np
 import soundfile as sf
 
+from f5_tts.studio import chatterbox_backend as chatterbox
 from f5_tts.studio.i18n import INTERFACE_LANGUAGES, catalogs, translate
 from f5_tts.studio.service import StudioService
 from f5_tts.studio.story_tools import parse_character_script
@@ -87,6 +89,27 @@ class StoryTests(unittest.TestCase):
         self.assertFalse(self.service.block_ready(blocks[1]))
         self.service.render_narration(project["id"])
         self.assertEqual(len(RecordingModel.calls), 4)
+
+    def test_chatterbox_language_change_invalidates_only_that_characters_audio(self):
+        self.cast[1].update(model_id=chatterbox.MODEL_ID, language="es")
+        python = chatterbox.chatterbox_python(self.service.home)
+        python.parent.mkdir(parents=True)
+        python.touch()
+        project = self.service.save_story(None, "Models", self.script, self.cast)
+
+        def synthesize(_python, _text, _reference, language, _device, output, *, cancel_event=None):
+            self.assertEqual(language, "es")
+            sf.write(output, np.ones(24000, dtype=np.float32) * 0.1, 24000)
+
+        with patch.object(chatterbox, "synthesize", side_effect=synthesize):
+            self.service.render_narration(project["id"])
+        blocks = self.service.narration(project["id"])["blocks"]
+        self.assertTrue(all(self.service.block_ready(block) for block in blocks))
+
+        self.cast[1]["language"] = "pt"
+        edited = self.service.save_story(project["id"], "Models", self.script, self.cast)
+        self.assertEqual([self.service.block_ready(block) for block in edited["blocks"]], [True, False, True])
+        self.assertEqual(edited["blocks"][1]["language"], "pt")
 
     def test_renaming_character_keeps_audio_and_updates_subtitles(self):
         project = self.service.save_story(None, "Rename", self.script, self.cast)

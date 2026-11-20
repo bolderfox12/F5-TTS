@@ -118,13 +118,16 @@ class F5TTS:
         file_spec=None,
         seed=None,
         progress_callback=None,
+        transcribe_clipped_reference=False,
     ):
         if seed is None:
             seed = random.randint(0, sys.maxsize)
         seed_everything(seed)
         self.seed = seed
 
-        ref_file, ref_text = preprocess_ref_audio_text(ref_file, ref_text, show_info=show_info)
+        ref_file, ref_text = preprocess_ref_audio_text(
+            ref_file, ref_text, show_info=show_info, transcribe_clipped_reference=transcribe_clipped_reference
+        )
 
         wav, sr, spec = infer_process(
             ref_file,

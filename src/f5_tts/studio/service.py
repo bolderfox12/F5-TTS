@@ -4,6 +4,7 @@ import base64
 import binascii
 import gc
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -21,6 +22,7 @@ import soundfile as sf
 import torch
 
 from f5_tts.audio import local_audio_input
+from f5_tts.studio import chatterbox_backend as chatterbox
 from f5_tts.studio.i18n import INTERFACE_LANGUAGES, translate
 from f5_tts.studio.local_tools import LocalTools
 from f5_tts.studio.story_tools import StoryTools
@@ -82,6 +84,9 @@ class StudioService(StoryTools, LocalTools):
             )
 
     def write(self, data):
+        self._write_json(self.home / "workspace.json", data)
+
+    def _write_json(self, destination, data):
         with self._storage:
             temporary = tempfile.NamedTemporaryFile(
                 mode="w", encoding="utf-8", dir=self.home, suffix=".tmp", delete=False
@@ -90,7 +95,7 @@ class StudioService(StoryTools, LocalTools):
             try:
                 with temporary:
                     json.dump(data, temporary, ensure_ascii=False, indent=2)
-                path.replace(self.home / "workspace.json")
+                path.replace(destination)
             finally:
                 path.unlink(missing_ok=True)
 
@@ -111,8 +116,11 @@ class StudioService(StoryTools, LocalTools):
 
     def model_choices(self):
         return {
-            model["id"]: self.translate_ui(model["name"]) if model["id"] == "original" else model["name"]
-            for model in self.models()
+            **{
+                model["id"]: self.translate_ui(model["name"]) if model["id"] == "original" else model["name"]
+                for model in self.models()
+            },
+            chatterbox.MODEL_ID: chatterbox.MODEL_NAME,
         }
 
     def backend(self):
@@ -136,6 +144,15 @@ class StudioService(StoryTools, LocalTools):
 
     def microphone_reference(self, encoded):
         """Convert a short browser recording to a managed, validated PCM WAV."""
+        return self._convert_microphone(encoded, self.upload_path("microfone.wav"))
+
+    def transcribe_chat_recording(self, encoded):
+        """Transcribe a chat recording without adding it to the workspace."""
+        with tempfile.TemporaryDirectory(prefix="f5-studio-chat-") as folder:
+            source = self._convert_microphone(encoded, Path(folder) / "recording.wav")
+            return self._transcribe_audio(source, "", "openai/whisper-small", save_record=False)
+
+    def _convert_microphone(self, encoded, output):
         if not isinstance(encoded, str) or not encoded or len(encoded) > 800000:
             raise ValueError("Gravação inválida ou muito grande. Grave um trecho de até 30 segundos.")
         try:
@@ -145,7 +162,6 @@ class StudioService(StoryTools, LocalTools):
         ffmpeg = shutil.which("ffmpeg")
         if not ffmpeg:
             raise ValueError("Instale o FFmpeg para usar gravações do microfone.")
-        output = self.upload_path("microfone.wav")
         try:
             with tempfile.TemporaryDirectory() as folder:
                 source = Path(folder) / "recording"
@@ -175,7 +191,7 @@ class StudioService(StoryTools, LocalTools):
                     capture_output=True,
                     timeout=30,
                 )
-            return self.validate_reference(output)
+            return self.validate_reference(output, allow_external=True)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
             output.unlink(missing_ok=True)
             raise ValueError("Não foi possível converter a gravação. Grave novamente.") from error
@@ -746,6 +762,8 @@ class StudioService(StoryTools, LocalTools):
         remove_noise=False,
         stereo=False,
         *,
+        language=chatterbox.DEFAULT_LANGUAGE,
+        cancel_event=None,
         _part_directory=None,
         _part_progress=None,
     ):
@@ -757,14 +775,17 @@ class StudioService(StoryTools, LocalTools):
             raise ValueError("Aguarde a operação atual ou pare o treinamento antes de gerar áudio.")
 
         def update_progress(running, percent, message):
+            if cancel_event is not None and cancel_event.is_set():
+                raise chatterbox.SynthesisCancelled
             if _part_progress is not None:
                 index, total = _part_progress
                 percent = (100 * index + percent) / total
                 message = f"Trecho {index + 1} de {total} · {message}"
             self.set_generation_status(running, percent, message)
 
-        update_progress(True, 1, "Validando texto e referência.")
+        path = None
         try:
+            update_progress(True, 1, "Validando texto e referência.")
             data = self.read()
             if voice_id:
                 voice = next((v for v in data["voices"] if v["id"] == voice_id), None)
@@ -772,6 +793,7 @@ class StudioService(StoryTools, LocalTools):
                     raise ValueError("Selecione uma voz existente.")
                 reference, transcript = voice["reference"], transcript or voice["transcript"]
             reference = self.validate_reference(reference or "", allow_external=bool(voice_id))
+            using_chatterbox = model_id == chatterbox.MODEL_ID
             vocabulary = ""
             architecture = "F5TTS_v1_Base"
             model_name = "F5-TTS original · inglês / chinês"
@@ -786,6 +808,13 @@ class StudioService(StoryTools, LocalTools):
                 model_name = project
             elif checkpoint:
                 raise ValueError("O checkpoint precisa pertencer a um projeto.")
+            elif using_chatterbox:
+                if language not in chatterbox.LANGUAGES:
+                    raise ValueError("Escolha um idioma compatível com o Chatterbox.")
+                python = chatterbox.chatterbox_python(self.home)
+                if not python.is_file():
+                    raise ValueError("Instale o ambiente do Chatterbox seguindo o guia do Studio.")
+                architecture, model_name = chatterbox.MODEL_ID, chatterbox.MODEL_NAME
             else:
                 selected = next((model for model in self.models() if model["id"] == model_id), None)
                 if selected is None:
@@ -798,50 +827,58 @@ class StudioService(StoryTools, LocalTools):
                 architecture, model_name = selected["architecture"], selected["name"]
             settings = data["settings"]
             version = self.model_version(checkpoint)
-            key = (
-                checkpoint or "",
-                vocabulary,
-                architecture,
-                settings["device"],
-                version,
-                self.model_version(vocabulary),
-            )
-            if self._model_key != key:
-                update_progress(True, 3, "Carregando modelo e vocoder.")
-                self._model = None
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                factory = self._model_factory
-                if factory is None:
-                    from f5_tts.api import F5TTS
-
-                    factory = F5TTS
-                self._model = factory(
-                    model=architecture,
-                    ckpt_file=checkpoint or "",
-                    vocab_file=vocabulary,
-                    device=None if settings["device"] == "auto" else settings["device"],
+            if using_chatterbox:
+                if self._model is not None:
+                    self._release_speech_model()
+            else:
+                key = (
+                    checkpoint or "",
+                    vocabulary,
+                    architecture,
+                    settings["device"],
+                    version,
+                    self.model_version(vocabulary),
                 )
-                self._model_key = key
+                if self._model_key != key:
+                    update_progress(True, 3, "Carregando modelo e vocoder.")
+                    self._release_speech_model()
+                    factory = self._model_factory
+                    if factory is None:
+                        from f5_tts.api import F5TTS
+
+                        factory = F5TTS
+                    self._model = factory(
+                        model=architecture,
+                        ckpt_file=checkpoint or "",
+                        vocab_file=vocabulary,
+                        device=None if settings["device"] == "auto" else settings["device"],
+                    )
+                    self._model_key = key
             update_progress(True, 7, "Preparando a inferência.")
             identifier = uuid4().hex
             path = (_part_directory or self.outputs) / (identifier + "." + output_format)
             spoken_text = self.pronounce(text.strip(), data.get("pronunciations", {}))
-            progress = _InferenceProgress(update_progress)
             with tempfile.TemporaryDirectory(prefix="f5-studio-") as temp_dir:
                 source = Path(temp_dir) / "generated.wav"
-                self._model.infer(
-                    ref_file=reference,
-                    ref_text=transcript or "",
-                    gen_text=spoken_text,
-                    nfe_step=settings["steps"],
-                    speed=settings["speed"],
-                    seed=42,
-                    progress=None,
-                    progress_callback=progress.update,
-                    file_wave=str(source),
-                )
+                if using_chatterbox:
+                    update_progress(True, 8, "Carregando o Chatterbox e sintetizando o áudio.")
+                    chatterbox.synthesize(
+                        python, spoken_text, reference, language, settings["device"], source, cancel_event=cancel_event
+                    )
+                else:
+                    progress = _InferenceProgress(update_progress)
+                    self._model.infer(
+                        ref_file=reference,
+                        ref_text=transcript or "",
+                        gen_text=spoken_text,
+                        nfe_step=settings["steps"],
+                        speed=settings["speed"],
+                        seed=42,
+                        progress=None,
+                        progress_callback=progress.update,
+                        transcribe_clipped_reference=True,
+                        file_wave=str(source),
+                    )
                 if not source.exists():
                     raise RuntimeError("O modelo não produziu o arquivo de áudio.")
                 update_progress(True, 92, "Finalizando e exportando o áudio.")
@@ -870,10 +907,20 @@ class StudioService(StoryTools, LocalTools):
                 "rating": "",
                 "note": "",
             }
+            if using_chatterbox:
+                entry.update(language=language, steps=None, speed=None)
+            update_progress(True, 99, "Finalizando e exportando o áudio.")
             if _part_directory is None:
                 self._save_generation(entry)
-            update_progress(_part_directory is not None, 100, "Geração concluída.")
+                self.set_generation_status(False, 100, "Geração concluída.")
+            else:
+                update_progress(True, 100, "Geração concluída.")
             return entry
+        except chatterbox.SynthesisCancelled:
+            if path is not None:
+                path.unlink(missing_ok=True)
+            self.set_generation_status(False, self.generation_status()["percent"], "Síntese cancelada.")
+            raise
         except Exception:
             current = self.generation_status()
             self.set_generation_status(False, current["percent"], "A geração não foi concluída.")
@@ -889,7 +936,18 @@ class StudioService(StoryTools, LocalTools):
             self.write(data)
 
     def generate_reference_turns(
-        self, parts, project, checkpoint, model_id, output_format, output_quality, noise_reduction, stereo
+        self,
+        parts,
+        project,
+        checkpoint,
+        model_id,
+        output_format,
+        output_quality,
+        noise_reduction,
+        stereo,
+        *,
+        language=chatterbox.DEFAULT_LANGUAGE,
+        cancel_event=None,
     ):
         if not 1 <= len(parts) <= 100:
             raise ValueError("Separe o roteiro em 1 a 100 trechos.")
@@ -924,6 +982,8 @@ class StudioService(StoryTools, LocalTools):
                             project,
                             checkpoint,
                             model_id,
+                            language=language,
+                            cancel_event=cancel_event,
                             _part_directory=directory,
                             _part_progress=(index, len(parts)),
                         )
@@ -932,6 +992,8 @@ class StudioService(StoryTools, LocalTools):
                         spoken.append(last["spoken_text"])
                         used_references[last["reference"]] = last["reference_transcript"]
                         Path(last["path"]).unlink()
+                if cancel_event is not None and cancel_event.is_set():
+                    raise chatterbox.SynthesisCancelled
                 self._export_generated_audio(joined, target, output_format, output_quality, noise_reduction, stereo)
             entry = {
                 **last,
@@ -955,9 +1017,15 @@ class StudioService(StoryTools, LocalTools):
                     self.remember_reference(reference, transcript)
                 except ValueError:
                     pass
+            if cancel_event is not None and cancel_event.is_set():
+                raise chatterbox.SynthesisCancelled
             self._save_generation(entry)
             self.set_generation_status(False, 100, "Geração concluída.")
             return entry
+        except chatterbox.SynthesisCancelled:
+            target.unlink(missing_ok=True)
+            self.set_generation_status(False, self.generation_status()["percent"], "Síntese cancelada.")
+            raise
         except Exception:
             target.unlink(missing_ok=True)
             self.set_generation_status(False, self.generation_status()["percent"], "A geração não foi concluída.")
@@ -1105,7 +1173,10 @@ class StudioService(StoryTools, LocalTools):
 
     def audio_waveform(self, source, points=180, analyze=False):
         """Return a compact peak envelope and duration for an audio-library preview."""
-        path = self._managed_asset(source)
+        return self._measure_waveform(self._managed_asset(source), points, analyze)
+
+    @staticmethod
+    def _measure_waveform(path, points=180, analyze=False):
         info = sf.info(path)
         bucket_size = max(1, (info.frames + points - 1) // points)
         peaks = []
@@ -1154,12 +1225,39 @@ class StudioService(StoryTools, LocalTools):
             result["quality"] = {"rms_db": float(rms_db), "clipping": clipping, "checks": checks}
         return result
 
+    def _review_keys(self):
+        try:
+            return json.loads((self.home / "review-credentials.json").read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+
+    def save_review_key(self, provider, key):
+        from f5_tts.studio.script_review import PROVIDERS
+
+        key = (key or "").strip()
+        if not key or provider not in PROVIDERS or not PROVIDERS[provider][0]:
+            raise ValueError("Informe a chave da API do provedor escolhido.")
+        with self._storage:
+            keys = self._review_keys()
+            keys[provider] = key
+            self._write_json(self.home / "review-credentials.json", keys)
+
+    def review_api_key(self, provider):
+        from f5_tts.studio.script_review import PROVIDERS
+
+        variable = PROVIDERS.get(provider, ("",))[0]
+        return (self._review_keys().get(provider) or os.environ.get(variable, "").strip()) if variable else ""
+
+    def review_key_active(self, provider):
+        return bool(self.review_api_key(provider))
+
     def suggest_narration(self, text, api_key="", provider="gemini", model="", instructions=""):
         if provider != "ollama" and self.read().get("offline", False):
             raise ValueError("O modo offline está ativo. Use o Ollama local ou desative o modo offline.")
         from f5_tts.studio.script_review import suggest_script
 
-        return suggest_script(text, api_key, provider, model, instructions)
+        key = api_key or (self._review_keys().get(provider, "") if provider != "ollama" else "")
+        return suggest_script(text, key, provider, model, instructions)
 
     def analyze_reference_with_gemini(self, source, api_key="", model=""):
         if self.read().get("offline", False):
@@ -1173,10 +1271,11 @@ class StudioService(StoryTools, LocalTools):
             sf.write(wav, audio, rate, format="WAV", subtype="PCM_16")
             from f5_tts.studio.script_review import analyze_gemini_reference
 
-            return analyze_gemini_reference(wav.getvalue(), api_key, model, self.interface_language())
+            key = api_key or self._review_keys().get("gemini", "")
+            return analyze_gemini_reference(wav.getvalue(), key, model, self.interface_language())
 
     def trim_reference(self, source, start, end):
-        if not 1 <= float(end) - float(start) <= 30:
+        if not 1 <= round(float(end) - float(start), 9) <= 30:
             raise ValueError("Use uma referência de 1 a 30 segundos; prefira até 12 segundos.")
         return self.trim_audio(source, start, end)
 
@@ -1188,8 +1287,8 @@ class StudioService(StoryTools, LocalTools):
         end = float(end_seconds)
         if not 0 <= start < end <= info.duration or end - start < 0.05:
             raise ValueError("Escolha um trecho válido de pelo menos 0,05 segundo.")
-        first = max(0, int(start * info.samplerate))
-        last = min(info.frames, int(end * info.samplerate))
+        first = max(0, round(start * info.samplerate))
+        last = min(info.frames, round(end * info.samplerate))
         if last <= first:
             raise ValueError("O trecho selecionado está vazio.")
         output = self.outputs / f"recorte-{uuid4().hex[:12]}.wav"

@@ -1,17 +1,24 @@
 """NiceGUI desktop-browser studio. Run with f5-tts_studio."""
 
 import argparse
+import json
 from pathlib import Path
+from threading import Event
 
 from nicegui import app, run, ui
 
 from f5_tts.audio import local_audio_input
+from f5_tts.studio import chatterbox_backend as chatterbox
+from f5_tts.studio.ai_console import creative_consoles
+from f5_tts.studio.audio_timeline import AudioTimeline
 from f5_tts.studio.file_pages import register_file_pages
+from f5_tts.studio.gemini_tips import STUDIO_FEATURES, gemini_tips, training_context_json
 from f5_tts.studio.http_security import StudioBrowserBoundary
 from f5_tts.studio.i18n import INTERFACE_LANGUAGES
 from f5_tts.studio.local_pages import register_local_pages
 from f5_tts.studio.microphone import Microphone
 from f5_tts.studio.model_pages import register_model_pages
+from f5_tts.studio.music_preview import music_preview
 from f5_tts.studio.reference_turns import reference_turn_editor
 from f5_tts.studio.script_review import local_review_models, preferred_review_model
 from f5_tts.studio.service import StudioService
@@ -49,9 +56,11 @@ def register_pages(service):
     t = service.translate_ui
     app.on_shutdown(service.stop_training)
 
-    async def action(fn, *args):
+    async def action(fn, *args, **kwargs):
         try:
-            return await run.io_bound(fn, *args)
+            return await run.io_bound(fn, *args, **kwargs)
+        except chatterbox.SynthesisCancelled:
+            return None
         except Exception as error:
             ui.notify(t(str(error)), type="negative", close_button=True, timeout=10000)
             return None
@@ -302,6 +311,23 @@ def register_pages(service):
                         quality_tips = ui.column().classes("w-full gap-1")
                     reference_quality.set_visibility(False)
 
+                    async def collect_tips(topic):
+                        if topic == "script":
+                            script = (text.value or "").strip()
+                            if not script:
+                                raise ValueError("Escreva ou cole um roteiro no campo de narração primeiro.")
+                            return script if len(script) <= 16_000 else "Início do roteiro:\n" + script[:16_000]
+                        if topic == "reference":
+                            source = active_reference()
+                            if not source:
+                                raise ValueError("Selecione uma referência para pedir dicas sobre o áudio.")
+                            measured = await run.io_bound(service.audio_waveform, source, 180, True)
+                            return json.dumps({name: value for name, value in measured.items() if name != "peaks"})
+                        if topic == "training":
+                            return await training_context_json(service, saved_model.value, trained_project.value)
+                        return STUDIO_FEATURES
+
+                    refresh_gemini_tips = gemini_tips(service, collect_tips)
                     gemini_reference_enabled = ui.switch(t("Ativar análise da referência com Gemini"), value=False)
                     with ui.column().classes("w-full gap-2") as gemini_reference_panel:
                         ui.label(
@@ -316,7 +342,6 @@ def register_pages(service):
                             source = active_reference()
                             if not gemini_reference_enabled.value or not source:
                                 return
-                            key = api_key.value if provider.value == "gemini" else session_keys.get("gemini", "")
                             model = (
                                 cloud_model.value if provider.value == "gemini" else session_models.get("gemini", "")
                             )
@@ -324,7 +349,7 @@ def register_pages(service):
                             gemini_assessment.clear()
                             gemini_reference_status.set_text(t("Analisando referência com Gemini…"))
                             try:
-                                result = await action(service.analyze_reference_with_gemini, source, key, model)
+                                result = await action(service.analyze_reference_with_gemini, source, model=model)
                                 if not result or active_reference() != source or not gemini_reference_enabled.value:
                                     return
                                 with gemini_assessment:
@@ -362,48 +387,35 @@ def register_pages(service):
 
                     reference_editor = {"source": ""}
                     with ui.expansion(t("Ouvir e recortar a referência"), icon="content_cut").classes("w-full"):
-                        reference_audio = ui.audio("").classes("w-full")
-                        reference_waveform = ui.echart(
-                            {
-                                "animation": False,
-                                "grid": {"left": 0, "right": 0, "top": 0, "bottom": 0},
-                                "xAxis": {"type": "category", "show": False, "data": []},
-                                "yAxis": {"type": "value", "show": False, "max": 1},
-                                "series": [
-                                    {"type": "bar", "data": [], "barWidth": "100%", "itemStyle": {"color": "#137d80"}}
-                                ],
-                            }
-                        ).classes("w-full h-16")
-                        reference_waveform.set_visibility(False)
-                        clip = ui.range(min=0, max=1, step=0.01).props("label-always").classes("w-full")
                         reference_hint = ui.label(t("Selecione uma referência para escolher o trecho.")).classes(
                             "text-sm studio-muted"
                         )
 
-                        async def use_clip():
+                        async def use_clip(event):
                             source = active_reference()
-                            if not source or reference_editor["source"] != source:
+                            selection = event.args
+                            if (
+                                not source
+                                or reference_editor["source"] != source
+                                or reference_editor.get("trimming")
+                                or not reference_audio.matches_trim(selection)
+                            ):
                                 return
-                            selection = clip.value.copy()
-                            trim_button.disable()
+                            reference_editor["trimming"] = True
+                            reference_audio.set_trimming(True)
                             try:
                                 result = await action(
-                                    service.trim_reference, source, selection["min"], selection["max"]
+                                    service.trim_reference, source, selection.get("start"), selection.get("end")
                                 )
                                 if result and active_reference() == source:
                                     paths.append(result["path"])
                                     await select_upload()
                                     upload_status.set_text(t("Recorte selecionado como referência."))
                             finally:
-                                trim_button.set_enabled(
-                                    bool(reference_editor["source"])
-                                    and reference_editor["source"] == active_reference()
-                                )
+                                reference_editor["trimming"] = False
+                                reference_audio.set_trimming(False)
 
-                        trim_button = ui.button(t("Usar só este trecho"), icon="content_cut", on_click=use_clip).props(
-                            "no-caps unelevated"
-                        )
-                        trim_button.disable()
+                        reference_audio = AudioTimeline(t, on_trim=use_clip).classes("w-full")
 
                     async def refresh_reference():
                         source = active_reference()
@@ -414,12 +426,10 @@ def register_pages(service):
                         reference_text.set_value(saved.get("transcript", recent.get(source, {}).get("transcript", "")))
                         favorite_button.set_enabled(bool(source))
                         reference_audio.set_source(source)
-                        reference_waveform.set_visibility(False)
+                        reference_hint.set_visibility(not source)
                         reference_quality.set_visibility(False)
-                        trim_button.disable()
                         transcribe_button.set_enabled(bool(source))
                         if not source:
-                            reference_hint.set_text(t("Selecione uma referência para escolher o trecho."))
                             return
                         waveform = await action(service.audio_waveform, source, 180, True)
                         if waveform and active_reference() == source:
@@ -458,16 +468,8 @@ def register_pages(service):
                                     t("Ouça e confira se há uma só voz, sem música, eco ou ruído de fundo.")
                                 ).classes("text-sm studio-muted")
                             reference_quality.set_visibility(True)
-                            peaks = waveform["peaks"]
-                            reference_waveform.options["xAxis"]["data"] = list(range(len(peaks)))
-                            reference_waveform.options["series"][0]["data"] = peaks
-                            reference_waveform.update()
-                            reference_waveform.set_visibility(True)
                             reference_editor["source"] = source
-                            clip.max = duration
-                            clip.set_value({"min": 0, "max": min(duration, 12)})
-                            reference_hint.set_text(t("Arraste o início e o fim. O recorte é salvo como um novo WAV."))
-                            trim_button.enable()
+                            reference_audio.set_waveform(waveform)
 
                     voice.on_value_change(refresh_reference)
                     saved_model = ui.select(
@@ -475,6 +477,15 @@ def register_pages(service):
                         value="original",
                         label=t("Modelo para gerar áudio"),
                     ).props("outlined")
+                    chatterbox_language = ui.select(
+                        chatterbox.LANGUAGES,
+                        value=chatterbox.DEFAULT_LANGUAGE,
+                        label=t("Idioma do Chatterbox"),
+                    ).props("outlined")
+                    chatterbox_language.set_visibility(False)
+                    saved_model.on_value_change(
+                        lambda event: chatterbox_language.set_visibility(event.value == chatterbox.MODEL_ID)
+                    )
                     ui.link(t("Cadastrar meu modelo em português ou outro checkpoint"), "/models").classes("text-sm")
                     with ui.expansion(t("Usar um modelo que eu treinei"), icon="school").classes("w-full"):
                         trained_project = ui.select(
@@ -537,10 +548,42 @@ def register_pages(service):
                             cloud_model = ui.input(
                                 t("Modelo de revisão"), value=preferred_review_model("gemini")
                             ).props("outlined")
-                            api_key = ui.input(t("Chave da API nesta sessão"), password=True).props("outlined")
-                            session_keys = {}
                             session_models = {}
                             current_provider = "gemini"
+
+                            def refresh_key_form(editing=False):
+                                active = service.review_key_active(current_provider)
+                                api_key.set_value("")
+                                key_status.set_visibility(active)
+                                change_key.set_visibility(active and not editing)
+                                key_form.set_visibility(editing or not active)
+                                cancel_key.set_visibility(active)
+
+                            def save_key():
+                                try:
+                                    service.save_review_key(current_provider, api_key.value)
+                                except ValueError as error:
+                                    ui.notify(t(str(error)), type="warning")
+                                except OSError:
+                                    ui.notify(t("Não foi possível salvar a chave da API."), type="negative")
+                                else:
+                                    refresh_key_form()
+                                    refresh_console_status()
+                                    refresh_gemini_tips()
+
+                            with ui.row().classes("items-center gap-2"):
+                                key_status = ui.label(t("Ativo")).classes("text-sm font-semibold text-positive")
+                                change_key = ui.button(
+                                    t("Trocar chave"), on_click=lambda: refresh_key_form(True)
+                                ).props("flat no-caps")
+                            with ui.column().classes("w-full") as key_form:
+                                api_key = ui.input(t("Chave da API"), password=True).props("outlined autocomplete=off")
+                                with ui.row().classes("items-center gap-2"):
+                                    ui.button(t("Salvar chave"), on_click=save_key).props("outline no-caps")
+                                    cancel_key = ui.button(t("Cancelar"), on_click=lambda: refresh_key_form()).props(
+                                        "flat no-caps"
+                                    )
+                            refresh_key_form()
 
                         with ui.column().classes("w-full") as local_settings:
                             ui.label(
@@ -588,7 +631,6 @@ def register_pages(service):
                         def switch_provider():
                             nonlocal current_provider
                             if current_provider != "ollama":
-                                session_keys[current_provider] = api_key.value
                                 session_models[current_provider] = cloud_model.value
                             current_provider = provider.value
                             local = current_provider == "ollama"
@@ -599,7 +641,9 @@ def register_pages(service):
                                 cloud_model.set_value(
                                     session_models.get(current_provider) or preferred_review_model(current_provider)
                                 )
-                                api_key.set_value(session_keys.get(current_provider, ""))
+                                refresh_key_form()
+                            else:
+                                api_key.set_value("")
 
                         provider.on_value_change(switch_provider)
 
@@ -617,10 +661,9 @@ def register_pages(service):
                                 result = await action(
                                     service.suggest_narration,
                                     source,
-                                    "" if selected_provider == "ollama" else api_key.value,
-                                    selected_provider,
-                                    model,
-                                    instructions,
+                                    provider=selected_provider,
+                                    model=model,
+                                    instructions=instructions,
                                 )
                             finally:
                                 review_state["busy"] = False
@@ -641,6 +684,9 @@ def register_pages(service):
                         suggest_button = ui.button(
                             t("Sugerir melhorias"), icon="auto_fix_high", on_click=review_script
                         ).props("outline no-caps")
+                        refresh_console_status = creative_consoles(
+                            service, action, text, lambda value: generate_from_console(value)
+                        )
 
                     with ui.column().classes("w-full gap-2") as suggestion:
                         revised_text = ui.textarea(t("Roteiro sugerido")).props("outlined rows=5").classes("w-full")
@@ -730,8 +776,16 @@ def register_pages(service):
                         )
                     ).classes("text-xs studio-muted")
                     status = ui.label(t("Pronto para começar.")).classes("studio-muted")
+                    cancel_event = None
+
+                    def cancel_synthesis():
+                        if cancel_event is not None:
+                            cancel_event.set()
+                            cancel_button.disable()
+                            status.set_text(t("Cancelando síntese…"))
 
                     async def generate():
+                        nonlocal cancel_event
                         button.disable()
                         try:
                             if automatic_review.value and review_state["reviewed"] != review_identity():
@@ -747,13 +801,22 @@ def register_pages(service):
                                 remove_noise.value,
                                 stereo.value,
                             )
+                            cancel_event = Event()
+                            cancel_button.enable()
+                            cancel_button.set_visibility(True)
                             if reference_turns_enabled.value:
                                 try:
                                     parts = selected_reference_turns()
                                 except ValueError as error:
                                     status.set_text(t(str(error)))
                                     return
-                                result = await action(service.generate_reference_turns, parts, *settings)
+                                result = await action(
+                                    service.generate_reference_turns,
+                                    parts,
+                                    *settings,
+                                    language=chatterbox_language.value,
+                                    cancel_event=cancel_event,
+                                )
                             else:
                                 result = await action(
                                     service.generate,
@@ -762,11 +825,14 @@ def register_pages(service):
                                     reference_text.value,
                                     voice.value,
                                     *settings,
+                                    language=chatterbox_language.value,
+                                    cancel_event=cancel_event,
                                 )
                             if result:
                                 await refresh_recent()
                                 generated.update(result)
-                                player.set_source(result["path"])
+                                await player.load(result["path"], service.audio_waveform)
+                                await preview_narration(result["path"])
                                 download.enable()
                                 status.set_text(
                                     t(
@@ -774,24 +840,42 @@ def register_pages(service):
                                         value_0=output_format.value.upper(),
                                     )
                                 )
+                            elif cancel_event.is_set():
+                                status.set_text(t("Síntese cancelada."))
                             else:
                                 status.set_text(t("Geração não concluída. Confira a mensagem e tente novamente."))
                         finally:
+                            cancel_event = None
+                            cancel_button.set_visibility(False)
                             button.enable()
+
+                    async def generate_from_console(value):
+                        if not button.enabled:
+                            ui.notify(t("Aguarde a geração atual."), type="warning")
+                            return
+                        text.set_value(value)
+                        await generate()
 
                     button = (
                         ui.button(t("Gerar áudio"), icon="play_arrow", on_click=generate)
                         .props("no-caps unelevated")
                         .classes("w-full py-3")
                     )
+                    cancel_button = (
+                        ui.button(t("Cancelar síntese"), icon="stop", on_click=cancel_synthesis)
+                        .props("outline no-caps color=negative")
+                        .classes("w-full")
+                    )
+                    cancel_button.set_visibility(False)
                 with ui.column().classes("w-full md:w-1/3 gap-5"):
                     with ui.card().classes("studio-card w-full"):
                         ui.label(t("04 / Resultado")).classes("font-semibold text-lg")
-                        player = ui.audio("").classes("w-full")
+                        player = AudioTimeline(t).classes("w-full")
                         download = ui.button(
                             t("Baixar áudio"), icon="download", on_click=lambda: ui.download.file(generated["path"])
                         ).props("flat no-caps")
                         download.disable()
+                        preview_narration = music_preview(service, t, action)
                         ui.separator()
                         ui.label(t("Progresso da geração")).classes("font-semibold")
                         generation_message = ui.label(t("Aguardando geração.")).classes("text-sm studio-muted")

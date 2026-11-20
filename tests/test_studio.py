@@ -29,6 +29,7 @@ from f5_tts.audio import load_audio, local_audio_input, save_audio
 from f5_tts.checkpoint_io import download_hf_model_file, load_checkpoint_weights
 from f5_tts.model.dataset import load_dataset
 from f5_tts.model.quantization import export_int8, int8_engine, is_int8_checkpoint, load_int8
+from f5_tts.studio import chatterbox_backend as chatterbox
 from f5_tts.studio.service import StudioService
 from f5_tts.studio.story_tools import split_reference_turns
 from f5_tts.train.studio_dataset import read_vocabulary
@@ -104,6 +105,50 @@ class StudioTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "formato de áudio"):
             local_audio_input(invalid)
 
+    def test_chatterbox_selection_and_switch_back_to_f5(self):
+        self.assertIn(chatterbox.MODEL_ID, self.service.model_choices())
+        self.service.generate("F5", self.reference)
+        original_model = self.service._model
+        with self.assertRaisesRegex(ValueError, "Instale o ambiente do Chatterbox"):
+            self.service.generate("Olá", self.reference, model_id=chatterbox.MODEL_ID)
+        self.assertIs(self.service._model, original_model)
+
+        python = chatterbox.chatterbox_python(self.service.home)
+        python.parent.mkdir(parents=True)
+        python.touch()
+
+        def synthesize(interpreter, text, reference, language, device, destination, *, cancel_event=None):
+            self.assertEqual(
+                (interpreter, text, reference, language, device), (python, "Hola", str(self.reference), "es", "auto")
+            )
+            save_audio(destination, torch.ones(1, 24000) * 0.1, 24000)
+
+        with patch.object(chatterbox, "synthesize", side_effect=synthesize):
+            result = self.service.generate("Hola", self.reference, model_id=chatterbox.MODEL_ID, language="es")
+        self.assertEqual(result["model_id"], chatterbox.MODEL_ID)
+        self.assertEqual(result["language"], "es")
+        self.assertEqual(sf.info(result["path"]).samplerate, 24000)
+        self.assertEqual(self.service.read()["history"][0], result)
+        self.assertIsNone(self.service._model)
+        self.service.generate("F5 again", self.reference)
+        self.assertIsNot(self.service._model, original_model)
+
+    def test_cancelled_synthesis_keeps_no_output_and_allows_retry(self):
+        cancel = threading.Event()
+
+        def cancel_inference(**kwargs):
+            cancel.set()
+            kwargs["progress_callback"](0, 1, 16, 1)
+
+        with patch.object(FakeModel, "infer", side_effect=cancel_inference):
+            with self.assertRaises(chatterbox.SynthesisCancelled):
+                self.service.generate("Cancel now", self.reference, cancel_event=cancel)
+        self.assertEqual(self.service.read()["history"], [])
+        self.assertEqual(list(self.service.outputs.iterdir()), [])
+        self.assertFalse(self.service.generation_status()["running"])
+        result = self.service.generate("Try again", self.reference)
+        self.assertTrue(Path(result["path"]).is_file())
+
     def test_generation_uses_settings_and_history_survives(self):
         voice = self.service.save_voice("Narrador", self.reference, "Hello world")
         self.service.settings("cpu", 48, 0.9)
@@ -115,6 +160,27 @@ class StudioTests(unittest.TestCase):
         self.assertEqual(self.service.read()["history"][0]["text"], "A new sentence.")
         self.service.rate(entry["id"], "Precisa melhorar", "Pronúncia")
         self.assertEqual(self.service.read()["history"][0]["note"], "Pronúncia")
+
+    def test_clipped_reference_can_use_local_transcription_of_the_excerpt(self):
+        from f5_tts.infer import utils_infer
+
+        long_reference = self.service.upload_path("long.wav")
+        sf.write(long_reference, np.full(14 * 24000, 0.15, dtype=np.float32), 24000)
+        with patch.object(utils_infer, "transcribe", return_value="Short transcript") as transcribe:
+            prepared, original_text = utils_infer.preprocess_ref_audio_text(long_reference, "Full transcript")
+            self.assertLess(sf.info(prepared).duration, 13)
+            self.assertEqual(original_text, "Full transcript. ")
+            repeated, corrected_text = utils_infer.preprocess_ref_audio_text(
+                long_reference, "Full transcript", transcribe_clipped_reference=True
+            )
+            self.assertEqual(repeated, prepared)
+            self.assertEqual(corrected_text, "Short transcript. ")
+            transcribe.assert_called_once_with(prepared)
+            _, short_text = utils_infer.preprocess_ref_audio_text(
+                self.reference, "Manual transcript", transcribe_clipped_reference=True
+            )
+            self.assertEqual(short_text, "Manual transcript. ")
+            transcribe.assert_called_once_with(prepared)
 
     def test_generation_can_use_a_trained_checkpoint(self):
         project = self.service.project("trained_voice")
@@ -168,6 +234,21 @@ class StudioTests(unittest.TestCase):
         with patch("f5_tts.studio.service.shutil.which", return_value=None):
             with self.assertRaisesRegex(ValueError, "FFmpeg"):
                 self.service.microphone_reference(base64.b64encode(b"audio").decode())
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg required")
+    def test_chat_microphone_transcribes_without_keeping_a_recording(self):
+        before = set(self.service.uploads.iterdir())
+
+        def transcribe(path, language, model, *, save_record):
+            self.assertTrue(Path(path).is_file())
+            self.assertEqual((language, model, save_record), ("", "openai/whisper-small", False))
+            return "Pergunta por voz"
+
+        with patch.object(self.service, "_transcribe_audio", side_effect=transcribe) as recognize:
+            result = self.service.transcribe_chat_recording(base64.b64encode(self.reference.read_bytes()).decode())
+        self.assertEqual(result, "Pergunta por voz")
+        self.assertFalse(Path(recognize.call_args.args[0]).exists())
+        self.assertEqual(set(self.service.uploads.iterdir()), before)
 
     def test_saved_models_switch_without_replacing_original(self):
         checkpoint = self.root / "portugues.pt"
@@ -225,6 +306,25 @@ class StudioTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.service.settings("cuda", 32, 1)
             self.assertFalse(self.service.hardware()["cuda"])
+
+    def test_review_keys_survive_reload_and_are_used_only_for_their_provider(self):
+        self.service.save_review_key("gemini", " gemini-test-key ")
+        self.service.save_review_key("openai", "openai-test-key")
+        reloaded = StudioService(self.service.home, self.root / "data")
+        self.assertTrue(reloaded.review_key_active("gemini"))
+        self.assertTrue(reloaded.review_key_active("openai"))
+        self.assertFalse(reloaded.review_key_active("ollama"))
+        self.assertNotIn("gemini-test-key", json.dumps(reloaded.read()))
+        if os.name == "posix":
+            self.assertEqual((reloaded.home / "review-credentials.json").stat().st_mode & 0o777, 0o600)
+        with patch("f5_tts.studio.script_review.suggest_script") as review:
+            reloaded.suggest_narration("Example", provider="openai")
+            self.assertEqual(review.call_args.args[1], "openai-test-key")
+            reloaded.suggest_narration("Example", provider="anthropic")
+            self.assertEqual(review.call_args.args[1], "")
+        with patch("f5_tts.studio.script_review.analyze_gemini_reference") as analyze:
+            reloaded.analyze_reference_with_gemini(self.reference)
+            self.assertEqual(analyze.call_args.args[1], "gemini-test-key")
 
     def test_gemini_review_uses_only_script_and_preserves_incomplete_responses(self):
         candidates = {

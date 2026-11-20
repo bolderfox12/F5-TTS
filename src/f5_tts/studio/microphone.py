@@ -4,7 +4,7 @@ from nicegui.element import Element
 
 
 class Microphone(Element, component="microphone.js"):
-    def __init__(self, on_recorded, translator=None):
+    def __init__(self, on_recorded, translator=None, *, for_chat=False):
         super().__init__()
         t = translator or (lambda text: text)
         self._props["labels"] = {
@@ -27,4 +27,16 @@ class Microphone(Element, component="microphone.js"):
             "selected": t("Gravação selecionada como referência."),
             "retry": t("Não foi possível usar a gravação. Grave de 1 a 30 segundos e tente novamente."),
         }
+        if for_chat:
+            self._props["stopSpeech"] = True
+            self._props["labels"].update(
+                start=t("Gravar pergunta"),
+                use=t("Enviar pergunta por voz"),
+                hint=t("Grave até 30 segundos. O Studio envia ao provedor apenas a transcrição da pergunta."),
+                preview=t("Ouça e envie a pergunta ou grave novamente."),
+                too_large=t("Grave uma pergunta mais curta."),
+                preparing=t("Transcrevendo sua pergunta…"),
+                selected=t("Pergunta enviada ao chat."),
+                retry=t("Não foi possível transcrever a pergunta. Grave novamente."),
+            )
         self.on("recorded", on_recorded)

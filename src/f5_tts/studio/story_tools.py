@@ -4,6 +4,8 @@ import re
 from collections import defaultdict, deque
 from uuid import uuid4
 
+from f5_tts.studio import chatterbox_backend as chatterbox
+
 
 def split_story_text(text, limit=1200):
     words, chunks, current = text.split(), [], ""
@@ -25,9 +27,15 @@ def parse_character_script(script, characters):
 
     def flush():
         for text in split_story_text(" ".join(lines)):
-            turns.append(
-                {"character": current["id"], "text": text, "voice": current["voice"], "model_id": current["model_id"]}
-            )
+            turn = {
+                "character": current["id"],
+                "text": text,
+                "voice": current["voice"],
+                "model_id": current["model_id"],
+            }
+            if current["model_id"] == chatterbox.MODEL_ID:
+                turn["language"] = current.get("language", chatterbox.DEFAULT_LANGUAGE)
+            turns.append(turn)
         lines.clear()
 
     for index, line in enumerate((script or "").splitlines(), 1):
@@ -60,7 +68,7 @@ class StoryTools:
         if not characters or len(characters) > 50:
             raise ValueError("Adicione de 1 a 50 personagens ao elenco.")
         voices = {voice["id"] for voice in self.read()["voices"]}
-        models = {model["id"] for model in self.models()}
+        models = self.model_choices()
         names, identifiers, result = set(), set(), []
         for character in characters:
             name = str(character.get("name", "")).strip()
@@ -76,7 +84,13 @@ class StoryTools:
                 raise ValueError(f"Escolha um modelo cadastrado para o personagem: {name}")
             names.add(name.casefold())
             identifiers.add(identifier)
-            result.append({"id": identifier, "name": name, "voice": character["voice"], "model_id": model_id})
+            item = {"id": identifier, "name": name, "voice": character["voice"], "model_id": model_id}
+            if model_id == chatterbox.MODEL_ID:
+                language = character.get("language", chatterbox.DEFAULT_LANGUAGE)
+                if language not in chatterbox.LANGUAGES:
+                    raise ValueError("Escolha um idioma compatível com o Chatterbox.")
+                item["language"] = language
+            result.append(item)
         return result
 
     def save_story(self, project_id, name, script, characters):
@@ -92,11 +106,19 @@ class StoryTools:
             reusable = defaultdict(deque)
             for block in project["blocks"] if project else []:
                 reusable[
-                    (block.get("character"), block["text"], block["voice"], block.get("model_id", "original"))
+                    (
+                        block.get("character"),
+                        block["text"],
+                        block["voice"],
+                        block.get("model_id", "original"),
+                        block.get("language"),
+                    )
                 ].append(block)
             blocks = []
             for turn in turns:
-                candidates = reusable[(turn["character"], turn["text"], turn["voice"], turn["model_id"])]
+                candidates = reusable[
+                    (turn["character"], turn["text"], turn["voice"], turn["model_id"], turn.get("language"))
+                ]
                 blocks.append(
                     candidates.popleft()
                     if candidates
@@ -138,6 +160,10 @@ class StoryTools:
                 model_id=character["model_id"],
                 pause=float(pause),
             )
+            if character["model_id"] == chatterbox.MODEL_ID:
+                block["language"] = character.get("language", chatterbox.DEFAULT_LANGUAGE)
+            else:
+                block.pop("language", None)
             project["mix"] = None
             self.write(data)
         return self.narration(project_id)

@@ -13,7 +13,7 @@ export default {
         :label="labels.use" :loading="sending" :disable="used || recording || requesting" @click="use" />
       <div role="status" aria-live="polite" :class="error ? 'text-negative' : 'text-grey-8'">{{ message }}</div>
     </div>`,
-  props: { labels: Object },
+  props: { labels: Object, stopSpeech: Boolean },
   data() {
     return { recording: false, requesting: false, sending: false, used: false, seconds: 0,
       preview: '', message: '', error: false, recorder: null, stream: null,
@@ -34,6 +34,7 @@ export default {
     },
     async start() {
       if (this.requesting || this.recording || this.sending) return;
+      if (this.stopSpeech) window.speechSynthesis?.cancel();
       this.requesting = true;
       this.error = false;
       this.message = this.labels.permission;

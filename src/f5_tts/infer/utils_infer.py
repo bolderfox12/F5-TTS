@@ -309,7 +309,7 @@ def remove_silence_edges(audio, silence_threshold=-42):
 # preprocess reference audio and text
 
 
-def preprocess_ref_audio_text(ref_audio_orig, ref_text, show_info=print):
+def preprocess_ref_audio_text(ref_audio_orig, ref_text, show_info=print, *, transcribe_clipped_reference=False):
     show_info("Converting audio...")
 
     # Compute a hash of the reference audio file
@@ -321,13 +321,14 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, show_info=print):
 
     if audio_hash in _ref_audio_cache:
         show_info("Using cached preprocessed reference audio...")
-        ref_audio = _ref_audio_cache[audio_hash]
+        ref_audio, clipped = _ref_audio_cache[audio_hash]
 
     else:  # first pass, do preprocess
         with tempfile.NamedTemporaryFile(suffix=".wav", **tempfile_kwargs) as f:
             temp_path = f.name
 
         aseg = AudioSegment.from_file(ref_audio_orig)
+        clipped = False
 
         # 1. try to find long silence for clipping
         non_silent_segs = silence.split_on_silence(
@@ -337,6 +338,7 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, show_info=print):
         for non_silent_seg in non_silent_segs:
             if len(non_silent_wave) > 6000 and len(non_silent_wave + non_silent_seg) > 12000:
                 show_info("Audio is over 12s, clipping short. (1)")
+                clipped = True
                 break
             non_silent_wave += non_silent_seg
 
@@ -349,6 +351,7 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, show_info=print):
             for non_silent_seg in non_silent_segs:
                 if len(non_silent_wave) > 6000 and len(non_silent_wave + non_silent_seg) > 12000:
                     show_info("Audio is over 12s, clipping short. (2)")
+                    clipped = True
                     break
                 non_silent_wave += non_silent_seg
 
@@ -357,6 +360,7 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, show_info=print):
         # 3. if no proper silence found for clipping
         if len(aseg) > 12000:
             aseg = aseg[:12000]
+            clipped = True
             show_info("Audio is over 12s, clipping short. (3)")
 
         aseg = remove_silence_edges(aseg) + AudioSegment.silent(duration=50)
@@ -364,8 +368,11 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, show_info=print):
         ref_audio = temp_path
 
         # Cache the processed reference audio
-        _ref_audio_cache[audio_hash] = ref_audio
+        _ref_audio_cache[audio_hash] = (ref_audio, clipped)
 
+    if clipped and transcribe_clipped_reference and ref_text.strip():
+        show_info("The reference was shortened; transcribing the excerpt used for inference.")
+        ref_text = ""
     if not ref_text.strip():
         global _ref_text_cache
         if audio_hash in _ref_text_cache:

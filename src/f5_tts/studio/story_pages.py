@@ -5,6 +5,8 @@ from uuid import uuid4
 
 from nicegui import ui
 
+from f5_tts.studio import chatterbox_backend as chatterbox
+
 
 def register_story_pages(service, shell, action):
     t = service.translate_ui
@@ -98,12 +100,28 @@ def register_story_pages(service, shell, action):
                                 value=character["voice"],
                                 on_change=lambda event, item=character: item.update(voice=event.value),
                             ).props("outlined").style("flex:1 1 180px;width:auto")
-                            ui.select(
-                                models,
-                                label=t("Modelo do personagem"),
-                                value=character["model_id"],
-                                on_change=lambda event, item=character: item.update(model_id=event.value),
-                            ).props("outlined").style("flex:1 1 180px;width:auto")
+                            model = (
+                                ui.select(models, label=t("Modelo do personagem"), value=character["model_id"])
+                                .props("outlined")
+                                .style("flex:1 1 180px;width:auto")
+                            )
+                            language = (
+                                ui.select(
+                                    chatterbox.LANGUAGES,
+                                    label=t("Idioma do Chatterbox"),
+                                    value=character.get("language", chatterbox.DEFAULT_LANGUAGE),
+                                    on_change=lambda event, item=character: item.update(language=event.value),
+                                )
+                                .props("outlined")
+                                .style("flex:1 1 180px;width:auto")
+                            )
+                            language.set_visibility(model.value == chatterbox.MODEL_ID)
+
+                            def change_model(event, item=character, field=language):
+                                item["model_id"] = event.value
+                                field.set_visibility(event.value == chatterbox.MODEL_ID)
+
+                            model.on_value_change(change_model)
 
                             def remove(item=character):
                                 state["cast"].remove(item)
