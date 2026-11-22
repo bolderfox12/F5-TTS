@@ -30,8 +30,12 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[studio]"
 python -m pip check
-bash iniciar-studio.sh
+f5-tts_studio --workspace "$PWD/.studio"
 ```
+
+O launcher local `bash iniciar-studio.sh` usa o ambiente Python 3.15 em
+`.studio/interface-python315`. Para apontar para outro ambiente 3.15 com o
+Studio instalado, defina `F5_STUDIO_UI_PYTHON` com o caminho do interpretador.
 
 Abra **http://127.0.0.1:7862**. No Windows, use `py -3.12 -m venv .venv`, ative
 `.venv\Scripts\Activate.ps1` e inicie com `f5-tts_studio`. O comando aceita `--no-browser`,
@@ -43,6 +47,9 @@ para manter acesso aos dados anteriores. A primeira geração pode baixar os pes
 e do vocoder. Whisper e NLLB usam caches próprios dentro do cache de modelos do ambiente.
 
 ## Primeiro áudio
+
+Em **Configurações**, escolha **NVIDIA / CUDA** e defina **Precisão na GPU**
+como **FP16** ou **FP32**. A opção vale para o F5-TTS compatível em CUDA.
 
 1. Abra **Criar áudio** e grave, envie ou selecione uma referência em **Minhas vozes**.
 2. Informe a transcrição exata da referência para pular a transcrição automática.

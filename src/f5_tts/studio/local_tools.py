@@ -190,6 +190,8 @@ class LocalTools:
         if block.get("model_project"):
             vocabulary = self.project_vocabulary(block["model_project"])
             payload["vocabulary_version"] = self.model_version(vocabulary)
+        if "precision" in settings and block.get("model_id") != chatterbox.MODEL_ID:
+            payload["precision"] = settings["precision"]
         if block.get("model_id") == chatterbox.MODEL_ID:
             payload.update(model_id=chatterbox.MODEL_ID, language=block.get("language", chatterbox.DEFAULT_LANGUAGE))
             payload.pop("steps")

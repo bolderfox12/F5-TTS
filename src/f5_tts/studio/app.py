@@ -1090,10 +1090,15 @@ def register_pages(service):
                 speed = ui.number(
                     t("Velocidade (1 = padrão)"), value=settings["speed"], min=0.3, max=2, step=0.1
                 ).props("outlined")
+                precision = ui.select(
+                    {"fp16": "FP16", "fp32": "FP32"},
+                    value=settings.get("precision", "fp16"),
+                    label=t("Precisão na GPU"),
+                ).props("outlined")
 
                 async def save():
                     try:
-                        await run.io_bound(service.settings, device.value, steps.value, speed.value)
+                        await run.io_bound(service.settings, device.value, steps.value, speed.value, precision.value)
                         ui.notify(t("Configurações salvas."), type="positive")
                     except Exception as error:
                         ui.notify(t(str(error)), type="negative")

@@ -4,6 +4,7 @@ from importlib.resources import files
 
 import numpy as np
 import soundfile as sf
+import torch
 import tqdm
 from hydra.utils import get_class
 from omegaconf import OmegaConf
@@ -34,6 +35,7 @@ class F5TTS:
         vocoder_local_path=None,
         device=None,
         hf_cache_dir=None,
+        precision=None,
     ):
         config_name = "F5TTS_Base" if model == "F5TTS_Base_bigvgan" else model
         model_cfg = OmegaConf.load(str(files("f5_tts").joinpath(f"configs/{config_name}.yaml")))
@@ -52,6 +54,12 @@ class F5TTS:
             self.device = device
         else:
             self.device = get_default_device()
+
+        if precision not in (None, "fp16", "fp32"):
+            raise ValueError("Choose FP16 or FP32.")
+        dtype = None
+        if str(self.device).startswith("cuda"):
+            dtype = {"fp16": torch.float16, "fp32": torch.float32}.get(precision)
 
         # Load models
         self.vocoder = load_vocoder(
@@ -80,7 +88,15 @@ class F5TTS:
                 )
             )
         self.ema_model = load_model(
-            model_cls, model_arc, ckpt_file, self.mel_spec_type, vocab_file, self.ode_method, self.use_ema, self.device
+            model_cls,
+            model_arc,
+            ckpt_file,
+            self.mel_spec_type,
+            vocab_file,
+            self.ode_method,
+            self.use_ema,
+            self.device,
+            dtype=dtype,
         )
 
     def transcribe(self, ref_audio, language=None):

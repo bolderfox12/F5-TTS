@@ -312,14 +312,19 @@ class StudioService(StoryTools, LocalTools):
             self.write(data)
         return voice
 
-    def settings(self, device, steps, speed):
+    def settings(self, device, steps, speed, precision=None):
         if device not in ("auto", "cpu", "cuda") or int(steps) not in (16, 32, 48) or not 0.3 <= float(speed) <= 2:
             raise ValueError("Configuração inválida.")
         if device == "cuda" and not torch.cuda.is_available():
             raise ValueError("CUDA não está disponível nesta máquina. Escolha Automático ou CPU.")
+        if precision is not None and precision not in ("fp16", "fp32"):
+            raise ValueError("Escolha FP16 ou FP32.")
         with self._storage:
             data = self.read()
-            data["settings"] = {"device": device, "steps": int(steps), "speed": float(speed)}
+            settings = data["settings"]
+            settings.update(device=device, steps=int(steps), speed=float(speed))
+            if precision is not None:
+                settings["precision"] = precision
             self.write(data)
 
     def hardware(self):
@@ -836,6 +841,7 @@ class StudioService(StoryTools, LocalTools):
                     vocabulary,
                     architecture,
                     settings["device"],
+                    settings.get("precision"),
                     version,
                     self.model_version(vocabulary),
                 )
@@ -852,6 +858,7 @@ class StudioService(StoryTools, LocalTools):
                         ckpt_file=checkpoint or "",
                         vocab_file=vocabulary,
                         device=None if settings["device"] == "auto" else settings["device"],
+                        **({"precision": settings["precision"]} if "precision" in settings else {}),
                     )
                     self._model_key = key
             update_progress(True, 7, "Preparando a inferência.")
