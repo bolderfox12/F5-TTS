@@ -684,8 +684,13 @@ def register_pages(service):
                         suggest_button = ui.button(
                             t("Sugerir melhorias"), icon="auto_fix_high", on_click=review_script
                         ).props("outline no-caps")
+                        music_library_refresh = []
                         refresh_console_status = creative_consoles(
-                            service, action, text, lambda value: generate_from_console(value)
+                            service,
+                            action,
+                            text,
+                            lambda value: generate_from_console(value),
+                            music_library_refresh,
                         )
 
                     with ui.column().classes("w-full gap-2") as suggestion:
@@ -876,6 +881,7 @@ def register_pages(service):
                         ).props("flat no-caps")
                         download.disable()
                         preview_narration = music_preview(service, t, action)
+                        preview_narration.register_refresh(music_library_refresh)
                         ui.separator()
                         ui.label(t("Progresso da geração")).classes("font-semibold")
                         generation_message = ui.label(t("Aguardando geração.")).classes("text-sm studio-muted")

@@ -79,6 +79,10 @@ def music_preview(service, t, action):
         empty_library.set_visibility(not options)
         update_buttons()
 
+    def register_refresh(callbacks):
+        if callbacks is not None:
+            callbacks.append(refresh_library)
+
     async def set_narration(path):
         nonlocal narration
         async with lock:
@@ -190,4 +194,5 @@ def music_preview(service, t, action):
         player.set_visibility(False)
     refresh_library()
     ui.context.client.on_delete(close)
+    set_narration.register_refresh = register_refresh
     return set_narration

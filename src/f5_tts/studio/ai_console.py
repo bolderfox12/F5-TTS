@@ -23,6 +23,7 @@ MEDIA_MODELS = {
     "gemini": {
         "image": ["gemini-nano-banana-2.1", "gemini-3.1-flash-image"],
         "video": ["gemini-omni-1.2-flash"],
+        "music": ["lyria-3-clip-preview", "lyria-3.5"],
     },
     "openai": {"image": ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]},
 }
@@ -30,7 +31,15 @@ TEXT_MODELS = {
     "gemini": ["gemini-3.5-flash-lite", "gemini-3.5-flash"],
     "openai": ["gpt-5.6-sol", "gpt-4.1-mini"],
 }
-MEDIA_SUFFIXES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "video/mp4": ".mp4"}
+MEDIA_SUFFIXES = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "video/mp4": ".mp4",
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/wav": ".wav",
+}
 USAGE_URLS = {"gemini": "https://aistudio.google.com/rate-limit", "openai": "https://platform.openai.com/usage"}
 IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 AUDIO_TYPES = {".mp3": "audio/mp3", ".wav": "audio/wav", ".m4a": "audio/m4a", ".flac": "audio/flac"}
@@ -62,6 +71,8 @@ class SpokenReply(Element, component="spoken_reply.js"):
 def _attachment_types(provider, kind):
     if kind == "video":
         return {**IMAGE_TYPES, **VIDEO_TYPES}
+    if kind == "music":
+        return IMAGE_TYPES
     if kind == "image":
         return IMAGE_TYPES
     if provider == "gemini":
@@ -206,7 +217,7 @@ async def stream_console(service, provider, model, prompt, history, attachments)
         raise ValueError("O provedor encerrou a resposta antes de concluir.")
 
 
-def _media_result(client, provider, kind, model, prompt, attachments):
+def _media_result(client, provider, kind, model, prompt, attachments, video_duration, video_aspect_ratio):
     if provider == "openai":
         fields = {"model": model, "prompt": prompt, "n": 1, "output_format": "png"}
         if attachments:
@@ -217,21 +228,25 @@ def _media_result(client, provider, kind, model, prompt, attachments):
         return response.raise_for_status().json()["data"][0]["b64_json"], "image/png"
     response_format = {"type": kind}
     if kind == "video":
-        response_format["duration"] = "8s"
+        response_format.update({"duration": video_duration, "aspect_ratio": video_aspect_ratio})
     inputs = prompt
     if attachments:
         inputs = [
             {"type": item.mime.split("/")[0], "data": item.encoded(), "mime_type": item.mime} for item in attachments
         ]
         inputs.append({"type": "text", "text": prompt})
+    body = {"model": model, "input": inputs, "store": False}
+    if kind != "music":
+        body["response_format"] = response_format
     response = client.post(
-        f"{GOOGLE}/interactions", json={"model": model, "input": inputs, "response_format": response_format}
+        f"{GOOGLE}/interactions", headers={"Api-Revision": "2026-05-20"}, json=body
     )
     interaction = response.raise_for_status().json()
     for step in interaction["steps"]:
         if step["type"] == "model_output":
             for part in step["content"]:
-                if part["type"] == kind and part.get("data"):
+                content_type = "audio" if kind == "music" else kind
+                if part["type"] == content_type and part.get("data"):
                     return part["data"], part["mime_type"]
     raise ValueError
 
@@ -259,12 +274,16 @@ def _request_settings(service, provider, kind, model, prompt, attachments):
     return headers, model, prompt or "Descreva os anexos."
 
 
-def generate_media(service, provider, kind, model, prompt, attachments):
+def generate_media(service, provider, kind, model, prompt, attachments, video_duration="8s", video_aspect_ratio="16:9"):
     headers, model, prompt = _request_settings(service, provider, kind, model, prompt, attachments)
     try:
-        with httpx.Client(headers=headers, timeout=600 if kind == "video" else 180) as client:
-            encoded, mime = _media_result(client, provider, kind, model, prompt, attachments)
-            if not mime.startswith(kind + "/") or mime not in MEDIA_SUFFIXES or len(encoded) > 140_000_000:
+        timeout = 600 if kind in {"video", "music"} else 180
+        with httpx.Client(headers=headers, timeout=timeout) as client:
+            encoded, mime = _media_result(
+                client, provider, kind, model, prompt, attachments, video_duration, video_aspect_ratio
+            )
+            media_type = "audio" if kind == "music" else kind
+            if not mime.startswith(media_type + "/") or mime not in MEDIA_SUFFIXES or len(encoded) > 140_000_000:
                 raise ValueError
             data = base64.b64decode(encoded, validate=True)
             if not data:
@@ -275,9 +294,10 @@ def generate_media(service, provider, kind, model, prompt, attachments):
         raise ValueError("A comunicação com o provedor de IA falhou.") from None
     except (ValueError, KeyError, IndexError, TypeError):
         raise ValueError("O provedor não retornou o conteúdo solicitado.") from None
-    directory = service.home / "ai-media"
+    directory = service.home / ("preview-music" if kind == "music" else "ai-media")
     directory.mkdir(mode=0o700, exist_ok=True)
-    path = directory / f"{uuid4().hex}{MEDIA_SUFFIXES[mime]}"
+    prefix = f"{uuid4().hex}-Gemini-" if kind == "music" else ""
+    path = directory / f"{prefix}{uuid4().hex}{MEDIA_SUFFIXES[mime]}"
     try:
         path.write_bytes(data)
     except OSError:
@@ -286,7 +306,7 @@ def generate_media(service, provider, kind, model, prompt, attachments):
     return path
 
 
-def creative_consoles(service, action, script_field, generate_audio):
+def creative_consoles(service, action, script_field, generate_audio, music_library_refresh=None):
     t = service.translate_ui
     speaker = SpokenReply()
     speaker.on(
@@ -317,8 +337,21 @@ def creative_consoles(service, action, script_field, generate_audio):
             status.classes(
                 add="text-positive" if online else "studio-muted", remove="studio-muted" if online else "text-positive"
             )
-            for control in (mode, model, prompt, uploader, submit, revise_button, reset_button, voice_mode):
+            for control in (
+                mode,
+                model,
+                video_duration,
+                video_aspect_ratio,
+                prompt,
+                uploader,
+                submit,
+                revise_button,
+                reset_button,
+                voice_mode,
+            ):
                 control.set_enabled(online and not busy)
+            video_duration.set_visibility(current_kind == "video")
+            video_aspect_ratio.set_visibility(current_kind == "video")
             voice_mode.set_visibility(current_kind == "text")
             recorder.set_visibility(online and current_kind == "text" and voice_mode.value)
             unavailable.set_visibility(not online)
@@ -473,10 +506,23 @@ def creative_consoles(service, action, script_field, generate_audio):
                                 ui.label(t(str(error))).classes("text-negative text-sm")
                         return
                 else:
-                    result = await action(generate_media, service, provider, kind, chosen_model, request, files)
+                    result = await action(
+                        generate_media,
+                        service,
+                        provider,
+                        kind,
+                        chosen_model,
+                        request,
+                        files,
+                        video_duration.value,
+                        video_aspect_ratio.value,
+                    )
                     if result is None:
                         reply.set_text(t("A criação não foi concluída."))
                         return
+                    if kind == "music":
+                        for refresh_library in music_library_refresh or ():
+                            refresh_library(result.name)
 
                 prompt.set_value("")
                 attachments.clear()
@@ -507,6 +553,11 @@ def creative_consoles(service, action, script_field, generate_audio):
                         reply.delete()
                         if kind == "image":
                             ui.image(result).classes("w-full max-w-xl")
+                        elif kind == "music":
+                            ui.audio(result).classes("w-full")
+                            ui.label(t("Música salva na biblioteca de música de fundo.")).classes(
+                                "text-sm studio-muted"
+                            )
                         else:
                             ui.video(result).classes("w-full max-w-xl")
                         ui.button(t("Baixar arquivo"), on_click=lambda path=result: ui.download.file(path)).props(
@@ -530,6 +581,8 @@ def creative_consoles(service, action, script_field, generate_audio):
                 kinds = {"text": t("História ou roteiro"), "image": t("Imagem")}
                 if "video" in models:
                     kinds["video"] = t("Vídeo")
+                if "music" in models:
+                    kinds["music"] = t("Música de fundo")
                 mode = ui.select(kinds, value="text", label=t("Tipo de criação")).classes("w-full sm:flex-1")
                 model = ui.select(
                     models["text"],
@@ -538,6 +591,19 @@ def creative_consoles(service, action, script_field, generate_audio):
                     new_value_mode="add-unique",
                 ).classes("w-full sm:flex-1")
                 mode.on_value_change(switch_mode)
+            with ui.row().classes("w-full gap-2"):
+                video_duration = ui.select(
+                    {f"{seconds}s": t("{value_0} segundos", value_0=seconds) for seconds in range(3, 16)},
+                    value="8s",
+                    label=t("Duração do vídeo"),
+                ).classes("w-full sm:flex-1")
+                video_aspect_ratio = ui.select(
+                    {"16:9": t("Paisagem 16:9"), "9:16": t("Retrato 9:16")},
+                    value="16:9",
+                    label=t("Formato do vídeo"),
+                ).classes("w-full sm:flex-1")
+                video_duration.set_visibility(False)
+                video_aspect_ratio.set_visibility(False)
             with ui.scroll_area().classes("w-full border border-slate-200 rounded-lg bg-white h-80") as scroll:
                 results = ui.column().classes("w-full p-3 gap-3")
             prompt = ui.textarea(t("O que você quer criar?")).props("outlined rows=3 maxlength=20000").classes("w-full")

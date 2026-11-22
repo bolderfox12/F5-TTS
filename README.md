@@ -156,6 +156,11 @@ when you click **Generate audio** with a new script.
 - **Cloud APIs.** Enter a key for the current page or configure `GEMINI_API_KEY`, `OPENAI_API_KEY`,
   or `ANTHROPIC_API_KEY` in the Studio process environment. Requests send the script to the selected
   provider. Reference audio and synthesis stay local. Studio's offline mode disables these APIs.
+- **Gemini media.** Open **AI consoles** to create videos with Gemini Omni Flash. Choose a duration
+  from 3 to 15 seconds and landscape or portrait framing. Choose **Background music** to generate a
+  track with Lyria 3 Clip or Lyria 3.5. Generated tracks are added to **Try background music** and
+  selected there for preview. These requests and any attached images are sent to Google and use the
+  Gemini API project's quota and billing.
 - **Local Ollama.** Install and start [Ollama](https://ollama.com/download) on the Studio machine and
   download a model, for example with `ollama pull qwen2.5:3b`. Select **Local Ollama**, click **Find
   local models**, then choose the installed model. Studio uses the loopback Ollama server at
