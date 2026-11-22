@@ -1,11 +1,13 @@
 """Character-first story editor backed by the existing narration renderer."""
 
 import re
+from pathlib import Path
 from uuid import uuid4
 
 from nicegui import ui
 
 from f5_tts.studio import chatterbox_backend as chatterbox
+from f5_tts.studio.montage_page import send_to_video_editor
 
 
 def register_story_pages(service, shell, action):
@@ -324,6 +326,17 @@ def register_story_pages(service, shell, action):
                 @ui.refreshable
                 def downloads():
                     if state["mix"]:
+
+                        def send_mix():
+                            mix = state["mix"]
+                            assets = [(mix["path"], t("Histórias e personagens"))]
+                            if mix.get("srt") and Path(mix["srt"]).is_file() and Path(mix["srt"]).stat().st_size:
+                                assets.append((mix["srt"], t("Legendas")))
+                            send_to_video_editor(service, action, assets, service.narration(state["project"])["name"])
+
+                        ui.button(t("Enviar ao editor de vídeo"), icon="video_library", on_click=send_mix).props(
+                            "outline no-caps"
+                        )
                         ui.button(
                             t("Baixar história WAV"),
                             icon="download",

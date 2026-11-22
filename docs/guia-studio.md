@@ -208,3 +208,129 @@ A versão foi validada com 49 testes automatizados, navegação no Chromium, sí
 RTX 3080 Ti e síntese INT8 em CPU x86. Um treino sintético de dois processos em CPU validou
 lotes distribuídos, acumulação, validação e checkpoints. O ambiente de teste tinha uma única GPU
 física. [Notas da versão](releases/v1.3.5.md)
+
+### Dublagem de vídeo
+
+O menu **Dublagem** tem **Dublagem por IA** e **Dublagem convencional com
+humanos**. Alterne pelos botões ou pelo menu lateral enquanto o projeto estiver
+aberto para manter vídeo, roteiro, áudios de IA e takes.
+
+1. Envie um MP4, MOV, MKV ou WebM de até 500 MB. Selecione o idioma original
+   e um modelo de transcrição. Whisper Small e Whisper Turbo rodam localmente.
+   **Gemini · transcrição e personagens** envia o áudio extraído ao Google e
+   reutiliza a chave Gemini do Studio ou aceita uma chave para a sessão.
+   **Revisar trechos sem transcrição** faz uma segunda passada em intervalos
+   com atividade sonora. Revise os cartões marcados como **Fala recuperada**.
+   A prévia do
+   vídeo original aparece após o envio.
+2. Clique em **Transcrever e separar vozes**. Revise o texto e corrija o número
+   do personagem em cada fala. Ouça a amostra original de cada personagem e
+   escolha outro trecho de referência, se necessário.
+3. Escolha o idioma de destino e o modelo de dublagem. O Chatterbox
+   Multilingual V3 usa as referências originais para sintetizar a fala de cada
+   personagem. Você também pode selecionar um modelo de voz registrado no Studio
+   que seja compatível com o idioma escolhido.
+4. Selecione **NLLB · tradução local** ou **Gemini · tradução do roteiro**.
+   A opção Gemini envia o texto do roteiro ao Google e reutiliza a mesma chave
+   da transcrição. Clique em **Traduzir roteiro**.
+5. No **Editor e revisão de dublagem**, clique em uma fala para ir até o
+   início dela no player. Ajuste os tempos, os textos ou o personagem e gere
+   as prévias. Use **Regerar fala** para atualizar somente o trecho alterado.
+   O indicador mostra a duração excedente. O ajuste automático acelera a fala
+   até 1,30×. Se o trecho ainda exceder a janela, encurte o texto ou ajuste os
+   tempos antes da exportação. **Encurtar fala com Gemini** propõe sinônimos
+   e expressões mais breves com base na janela e na duração medida. Escolha
+   uma sugestão e regenere a fala para conferir a duração antes de exportar.
+6. Em **Mixagem e exportação**, ajuste os volumes do fundo e da voz. O Demucs
+   separa música e efeitos da voz original. Clique em **Gerar prévia dublada**
+   para ouvir a mixagem e conferir o vídeo antes de clicar em **Exportar vídeo
+   dublado**. A barra no canto da tela mostra a etapa atual de transcrição,
+   síntese, mixagem ou renderização. **Encurtar e sincronizar falas com Gemini
+   na prévia** tenta ajustar as falas que excedem o tempo, inclusive em **Gerar
+   prévia editada**. O Studio mede a síntese de cada alternativa e só aplica
+   uma versão que caiba na janela com a velocidade permitida.
+   A exportação direta preserva o fluxo de vídeo original e usa MP4 ou MKV,
+   conforme a compatibilidade do codec.
+7. Após exportar um MP4, use o editor de montagem para comparar os vídeos,
+   cortar o trecho, juntar outros clipes de até 500 MB por arquivo e adicionar transições, música ou
+   legendas. **Gerar prévia editada** disponibiliza o MP4 e o SRT da montagem.
+
+A dublagem aceita português, inglês, espanhol, francês, alemão, coreano,
+japonês e chinês (mandarim, com tradução em caracteres simplificados). O
+processamento é local e requer FFmpeg, o ambiente Chatterbox e os pesos dos
+modelos. O editor usa FFprobe e a incorporação de legendas requer FFmpeg com libass. O primeiro uso pode baixar pesos, inclusive os do tradutor NLLB.
+A separação agrupa os trechos reconhecidos e pode precisar de correções, em
+especial quando há vozes sobrepostas. A separação de fundo por Demucs também pode
+deixar resíduos da voz original em áudios difíceis.
+
+#### Instalar o Demucs para preservar o fundo
+
+O Studio usa `demucs` no PATH, o comando indicado em `F5_STUDIO_DEMUCS` ou um
+ambiente isolado em `<workspace>/demucs/.venv`. Exemplo em Linux com `uv` e CPU:
+
+```bash
+uv venv --python 3.12 .studio/demucs/.venv
+uv pip install --python .studio/demucs/.venv/bin/python \
+  --index https://download.pytorch.org/whl/cpu \
+  'torch==2.8.0+cpu' 'torchaudio==2.8.0+cpu' 'demucs==4.0.1' soundfile
+```
+
+Os pesos são baixados no primeiro uso. Com o volume de fundo em 0%, a separação
+não é necessária. Os WAVs e exportações de cada revisão ficam em
+`<workspace>/outputs/dubbing/<id-do-projeto>`. A revisão é aberta na sessão da
+página.
+
+
+#### Gravar takes humanos e combinar com IA
+
+1. Abra **Dublagem convencional com humanos** e envie o vídeo. Use a transcrição
+   como guia ou clique em **Adicionar fala** para marcar um trecho manualmente.
+2. Clique em **Ativar e testar microfone**, selecione o dispositivo e observe o
+   medidor. Escolha o guia mudo, o original a 20% ou a faixa M&E separada pelo
+   Demucs. Prepare a faixa M&E antes de selecioná-la.
+3. Ajuste os tempos da fala e clique em **Gravar com contagem (3-2-1)**. O vídeo
+   recua até três segundos, toca os bipes e a contagem visual acompanha o
+   tempo restante da fala. Ouça os takes e selecione qual entra na mixagem.
+4. Volte à IA para sintetizar as outras falas, se desejar. O take ativo de cada
+   fala tem prioridade na exportação. Use **Usar voz de IA nesta fala** para
+   voltar à síntese, sem excluir o take gravado.
+5. Ajuste, se necessário, a compensação de latência global e o ajuste fino de
+   cada fala. Valores negativos adiantam a voz gravada. O tratamento opcional
+   reduz ruído, filtra graves, comprime picos e normaliza o nível.
+6. Gere a prévia e exporte. Os takes são padronizados em WAV mono de 48 kHz e
+   guardados por projeto e fala em `outputs/dubbing/<projeto>/takes/<fala>`.
+
+
+### Editor de vídeo avançado
+
+Abra **Edição → Editor de vídeo avançado**. Crie um projeto ou abra uma
+montagem salva. As telas **Criar áudio**, **Dublagem**, **Projetos de narração**,
+**Histórias e personagens** e **Biblioteca de áudios** também oferecem
+**Enviar ao editor de vídeo** para iniciar uma montagem ou adicionar ao fim
+de uma existente.
+
+Busque vídeos, áudios e SRT já presentes no Studio, importe mídias ou crie
+legendas na própria tela. Clique na régua da linha do tempo para marcar um
+ponto e adicione o arquivo no cursor. Arraste os clipes para mudar sua posição.
+Use o cartão de edição para cortar, dividir, mudar de faixa ou ajustar o volume.
+Pressione **S** para dividir no cursor. Clique com o botão direito no clipe
+para duplicá-lo. No nome da faixa de áudio, **Duplicar faixa** cria uma faixa
+nova com cópias dos clipes. Também é possível criar faixas vazias com
+**Adicionar faixa de áudio**.
+Vídeos com som entram com imagem e áudio vinculados. O áudio tem pitch
+ajustável de −48 a +48 semitons, sem mudar a duração da faixa. Clique com o
+botão direito no áudio e escolha **Pitch e equalizador** para ajustar pitch,
+graves, médios e agudos por clipe. Em projetos antigos,
+selecione um vídeo com som e use **Separar áudio do vídeo**.
+Use **Adicionar texto** para escrever um título editável na faixa TX.
+
+A faixa V1 é o vídeo principal e V2 aparece sobreposta no canto. A1 e A2 podem
+combinar voz, música e efeitos. A faixa CC incorpora as legendas e gera o SRT.
+No clipe da faixa V1, use **Efeitos de vídeo** pelo botão direito ou pela
+barra acima da timeline. Ajuste HSL, Lab com inversão de luminosidade,
+Gradient Map, Pinch and Punch e Swirl separadamente. Os efeitos podem ser
+combinados. Alterar um controle ativa o efeito automaticamente. Use
+**Aplicar e gerar prévia** para conferir o resultado no trecho do clipe.
+
+As configurações oferecem HD, Full HD e formato vertical. Gere uma prévia e
+exporte MP4 e SRT quando estiver pronto.

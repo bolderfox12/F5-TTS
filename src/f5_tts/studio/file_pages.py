@@ -4,6 +4,9 @@ from pathlib import Path
 
 from nicegui import ui
 
+from f5_tts.studio.montage import asset_kind
+from f5_tts.studio.montage_page import send_to_video_editor
+
 
 def register_file_pages(service, shell, action):
     t = service.translate_ui
@@ -209,6 +212,18 @@ def register_file_pages(service, shell, action):
                                 icon="download",
                                 on_click=lambda path=item["path"]: ui.download.file(path),
                             ).props("flat no-caps")
+
+                            if asset_kind(item["path"]):
+                                ui.button(
+                                    t("Enviar ao editor de vídeo"),
+                                    icon="video_library",
+                                    on_click=lambda asset=item: send_to_video_editor(
+                                        service,
+                                        action,
+                                        [(asset["path"], asset["name"])],
+                                        asset["name"],
+                                    ),
+                                ).props("flat no-caps")
 
                             if is_audio:
                                 with ui.dialog() as voice_dialog, ui.card().classes("studio-card w-full max-w-xl"):

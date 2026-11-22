@@ -5376,5 +5376,1293 @@
   ["Escolha um idioma compatível com o Chatterbox.", "Choose a language supported by Chatterbox."],
   ["Instale o ambiente do Chatterbox seguindo o guia do Studio.", "Install the Chatterbox environment by following the Studio guide."],
   ["Carregando o Chatterbox e sintetizando o áudio.", "Loading Chatterbox and synthesizing audio."],
-  ["O Chatterbox falhou. Confira a instalação, o dispositivo e o log do Studio.", "Chatterbox failed. Check the installation, device and Studio log."]
+  ["O Chatterbox falhou. Confira a instalação, o dispositivo e o log do Studio.", "Chatterbox failed. Check the installation, device and Studio log."],
+  [
+    "A faixa dublada substitui o áudio original, incluindo música e efeitos.",
+    "The dubbed track replaces the original audio, including music and effects."
+  ],
+  [
+    "Baixar MP4",
+    "Download MP4"
+  ],
+  [
+    "Corrija a fala e use o mesmo número nos trechos do mesmo personagem.",
+    "Edit the dialogue and use the same number for lines spoken by the same person."
+  ],
+  [
+    "DUBLAGEM",
+    "DUBBING"
+  ],
+  [
+    "Dublagem de vídeo",
+    "Video dubbing"
+  ],
+  [
+    "Envie um vídeo MP4, MOV, MKV ou WebM de até 500 MB.",
+    "Upload an MP4, MOV, MKV or WebM video up to 500 MB."
+  ],
+  [
+    "Escolher vídeo",
+    "Choose video"
+  ],
+  [
+    "Gerando as vozes e exportando o vídeo…",
+    "Generating voices and exporting video…"
+  ],
+  [
+    "Gerar vídeo dublado",
+    "Generate dubbed video"
+  ],
+  [
+    "Idioma da dublagem",
+    "Dubbing language"
+  ],
+  [
+    "Idioma original",
+    "Source language"
+  ],
+  [
+    "Informe um número de personagem maior que zero.",
+    "Enter a speaker number greater than zero."
+  ],
+  [
+    "Instale o FFmpeg para dublar vídeos.",
+    "Install FFmpeg to dub videos."
+  ],
+  [
+    "Modelo de dublagem",
+    "Dubbing model"
+  ],
+  [
+    "Modelo de transcrição",
+    "Transcription model"
+  ],
+  [
+    "Não foi possível processar o vídeo ou a faixa de áudio com FFmpeg.",
+    "FFmpeg could not process the video or audio track."
+  ],
+  [
+    "O Chatterbox gerou um trecho sem áudio.",
+    "Chatterbox generated an empty audio segment."
+  ],
+  [
+    "O F5-TTS original é para inglês e chinês. Escolha outro modelo para este idioma.",
+    "The original F5-TTS model supports English and Chinese. Choose another model for this language."
+  ],
+  [
+    "O processamento do vídeo excedeu o tempo limite.",
+    "Video processing timed out."
+  ],
+  [
+    "Personagem {value_0}",
+    "Speaker {value_0}"
+  ],
+  [
+    "Preencha a tradução de todos os trechos antes de dublar.",
+    "Complete the translation for every segment before dubbing."
+  ],
+  [
+    "Preencha a transcrição de todos os trechos antes de dublar.",
+    "Complete the transcript for every segment before dubbing."
+  ],
+  [
+    "Referências por personagem",
+    "Voice references by speaker"
+  ],
+  [
+    "Selecione um modelo de dublagem existente.",
+    "Select an existing dubbing model."
+  ],
+  [
+    "Separe as vozes do vídeo, revise a transcrição e duble no idioma escolhido.",
+    "Separate the speakers, review the transcript and dub the video in another language."
+  ],
+  [
+    "Traduza novamente após alterar o idioma ou o roteiro original.",
+    "Translate again after changing the language or the source transcript."
+  ],
+  [
+    "Traduzindo o roteiro…",
+    "Translating dialogue…"
+  ],
+  [
+    "Traduzir roteiro",
+    "Translate dialogue"
+  ],
+  [
+    "Tradução e modelo de dublagem",
+    "Translation and dubbing model"
+  ],
+  [
+    "Transcreva novamente após alterar o idioma original.",
+    "Transcribe again after changing the source language."
+  ],
+  [
+    "Transcrevendo e identificando as vozes…",
+    "Transcribing and identifying speakers…"
+  ],
+  [
+    "Transcrever e separar vozes",
+    "Transcribe and identify speakers"
+  ],
+  [
+    "Transcrição original",
+    "Source transcript"
+  ],
+  [
+    "Transcrição traduzida",
+    "Translated transcript"
+  ],
+  [
+    "Precisão na GPU",
+    "GPU precision"
+  ],
+  [
+    "Trecho de referência",
+    "Reference clip"
+  ],
+  [
+    "Vídeo e modelo de transcrição",
+    "Video and transcription model"
+  ],
+  [
+    "Adicionar legenda",
+    "Add caption"
+  ],
+  [
+    "Adicionar música",
+    "Add music"
+  ],
+  [
+    "Adicionar outros vídeos",
+    "Add more videos"
+  ],
+  [
+    "Amarelo com contorno",
+    "Yellow with outline"
+  ],
+  [
+    "Aplicando edição ao vídeo…",
+    "Applying video edits…"
+  ],
+  [
+    "Branco com contorno",
+    "White with outline"
+  ],
+  [
+    "Branco com fundo",
+    "White with background"
+  ],
+  [
+    "Clipes e transições",
+    "Clips and transitions"
+  ],
+  [
+    "Corte direto",
+    "Hard cut"
+  ],
+  [
+    "Editar legendas",
+    "Edit captions"
+  ],
+  [
+    "Editor de vídeo dublado",
+    "Dubbed video editor"
+  ],
+  [
+    "Escolha um arquivo de música compatível.",
+    "Choose a supported music file."
+  ],
+  [
+    "Escolha um estilo de legenda e uma transição disponíveis.",
+    "Choose an available caption style and transition."
+  ],
+  [
+    "Escolha um intervalo de pelo menos 0,01 s dentro do vídeo.",
+    "Choose a range of at least 0.01 s within the video."
+  ],
+  [
+    "Escolha um volume entre 0% e 200% para a voz e até 100% para a música.",
+    "Choose up to 200% volume for the voice and up to 100% for the music."
+  ],
+  [
+    "Escurecer entre clipes",
+    "Fade through black"
+  ],
+  [
+    "Estilo da legenda",
+    "Caption style"
+  ],
+  [
+    "Gerar prévia editada",
+    "Generate edited preview"
+  ],
+  [
+    "Gere um vídeo dublado antes de editar.",
+    "Generate a dubbed video before editing."
+  ],
+  [
+    "Incorporar legendas no MP4",
+    "Burn captions into the MP4"
+  ],
+  [
+    "Informe início, fim e volume válidos.",
+    "Enter a valid start time, end time, and volume."
+  ],
+  [
+    "Informe o início e o fim de cada legenda.",
+    "Enter the start and end time for each caption."
+  ],
+  [
+    "Instale o FFmpeg para editar vídeos.",
+    "Install FFmpeg to edit videos."
+  ],
+  [
+    "Instale o FFprobe para editar vídeos.",
+    "Install FFprobe to edit videos."
+  ],
+  [
+    "Não foi possível ler a duração ou a imagem de um dos vídeos.",
+    "Could not read the duration or picture of one of the videos."
+  ],
+  [
+    "Os clipes entram depois do trecho dublado, na ordem da lista.",
+    "Clips play after the dubbed video in the order shown."
+  ],
+  [
+    "Os tempos das legendas seguem o vídeo dublado antes do corte e depois os clipes adicionados.",
+    "Caption times refer to the untrimmed dubbed video followed by the added clips."
+  ],
+  [
+    "Preencha o texto das legendas ou remova as linhas vazias.",
+    "Enter caption text or remove empty captions."
+  ],
+  [
+    "Prévia editada. Os downloads usam esta versão.",
+    "Edited preview. Downloads use this version."
+  ],
+  [
+    "Remover legenda",
+    "Remove caption"
+  ],
+  [
+    "Restaurar vídeo dublado",
+    "Restore dubbed video"
+  ],
+  [
+    "Retirar clipe",
+    "Remove clip"
+  ],
+  [
+    "Retirar música",
+    "Remove music"
+  ],
+  [
+    "Texto da legenda",
+    "Caption text"
+  ],
+  [
+    "Transição entre clipes",
+    "Transition between clips"
+  ],
+  [
+    "Use clipes MP4, MOV, MKV ou WebM.",
+    "Use MP4, MOV, MKV, or WebM clips."
+  ],
+  [
+    "Use um intervalo válido dentro do vídeo para cada legenda.",
+    "Use a caption time range within the video."
+  ],
+  [
+    "Volume da dublagem (%)",
+    "Dub volume (%)"
+  ],
+  [
+    "Volume da música (%)",
+    "Music volume (%)"
+  ],
+  [
+    "Linha do tempo do vídeo",
+    "Video timeline"
+  ],
+  [
+    "Vídeo original",
+    "Original video"
+  ],
+  [
+    "Vídeo dublado",
+    "Dubbed video"
+  ],
+  [
+    "Voz dublada",
+    "Dubbed voice"
+  ],
+  [
+    "Legendas",
+    "Captions"
+  ],
+  [
+    "Não foi possível reproduzir o vídeo original.",
+    "Could not play the original video."
+  ],
+  [
+    "Preparando a prévia do vídeo original…",
+    "Preparing the original video preview…"
+  ],
+  [
+    "Instale o FFmpeg para preparar a prévia do vídeo.",
+    "Install FFmpeg to prepare the video preview."
+  ],
+  [
+    "Gemini · transcrição e personagens",
+    "Gemini · transcription and speakers"
+  ],
+  [
+    "Ao transcrever com Gemini, o áudio extraído do vídeo é enviado ao Google.",
+    "Gemini transcription sends the video's extracted audio to Google."
+  ],
+  [
+    "Chave Gemini (opcional se já configurada)",
+    "Gemini API key (optional if already configured)"
+  ],
+  [
+    "O modo offline está ativo. Desative-o para transcrever com Gemini.",
+    "Turn off offline mode to transcribe with Gemini."
+  ],
+  [
+    "O áudio excede o limite do Gemini nesta tela. Use um trecho menor ou o Whisper.",
+    "The audio exceeds the Gemini limit on this page. Use a shorter clip or Whisper."
+  ],
+  [
+    "Não foi possível transcrever com Gemini. Confira a chave, a cota e o modelo.",
+    "Gemini transcription failed. Check your key, quota, and model."
+  ],
+  [
+    "O Gemini não retornou uma transcrição completa com tempos e personagens.",
+    "Gemini did not return a complete transcript with timings and speakers."
+  ],
+  [
+    "NLLB · tradução local",
+    "NLLB · local translation"
+  ],
+  [
+    "Gemini · tradução do roteiro",
+    "Gemini · script translation"
+  ],
+  [
+    "Modelo de tradução",
+    "Translation model"
+  ],
+  [
+    "Ao traduzir com Gemini, o texto do roteiro é enviado ao Google.",
+    "Gemini translation sends the script text to Google."
+  ],
+  [
+    "Escolha um modelo de tradução disponível.",
+    "Choose an available translation model."
+  ],
+  [
+    "O modo offline está ativo. Desative-o para traduzir com Gemini.",
+    "Turn off offline mode to translate with Gemini."
+  ],
+  [
+    "Não foi possível traduzir com Gemini. Confira a chave, a cota e o modelo.",
+    "Gemini translation failed. Check your key, quota, and model."
+  ],
+  [
+    "O Gemini não retornou uma tradução para cada fala do roteiro.",
+    "Gemini did not return a translation for every line."
+  ],
+  [
+    "Tratar o áudio da dublagem",
+    "Enhance dubbed audio"
+  ],
+  [
+    "Reduz graves indesejados, equilibra o volume e controla picos da voz.",
+    "Reduces low-frequency noise, balances volume and controls voice peaks."
+  ],
+  [
+    "Trechos para revisar na sincronização ({value_0})",
+    "Segments to review for sync ({value_0})"
+  ],
+  [
+    "Essas falas foram aceleradas para caber. Se soarem rápidas, encurte a tradução e gere novamente.",
+    "These lines were sped up to fit. If they sound too fast, shorten the translation and generate again."
+  ],
+  [
+    "Um trecho da dublagem foi gerado sem fala audível.",
+    "A dubbed segment was generated without audible speech."
+  ],
+  [
+    "Revise os tempos do roteiro antes de gerar a dublagem.",
+    "Review the dialogue timings before generating the dub."
+  ],
+  [
+    "Instale o FFprobe para analisar vídeos.",
+    "Install FFprobe to analyze videos."
+  ],
+  [
+    "Ir para esta fala",
+    "Jump to this line"
+  ],
+  [
+    "Excede {value_0} s",
+    "Over by {value_0} s"
+  ],
+  [
+    "Áudio de {value_0} s",
+    "Audio length {value_0} s"
+  ],
+  [
+    "Texto traduzido",
+    "Translated dialogue"
+  ],
+  [
+    "Regerar fala",
+    "Regenerate line"
+  ],
+  [
+    "Novo personagem",
+    "New character"
+  ],
+  [
+    "Gerando prévias das falas…",
+    "Generating voice previews…"
+  ],
+  [
+    "Mixando e exportando o vídeo…",
+    "Mixing and exporting the video…"
+  ],
+  [
+    "Áudio de fundo (música e efeitos)",
+    "Background audio (music and effects)"
+  ],
+  [
+    "Ajustar velocidade automaticamente para caber no tempo da fala",
+    "Automatically fit the speed to the line's timing"
+  ],
+  [
+    "Exportar vídeo dublado",
+    "Export dubbed video"
+  ],
+  [
+    "Preencha os tempos e a tradução de todas as falas.",
+    "Enter the timings and translation for every line."
+  ],
+  [
+    "Preencha a tradução desta fala.",
+    "Enter the translation for this line."
+  ],
+  [
+    "Editor e revisão de dublagem",
+    "Dubbing review and editor"
+  ],
+  [
+    "Mixagem e exportação",
+    "Mix and export"
+  ],
+  [
+    "Instale o Demucs para preservar música e efeitos ou deixe o fundo em 0%.",
+    "Install Demucs to keep music and effects, or set background audio to 0%."
+  ],
+  [
+    "Gerar prévias das falas",
+    "Generate voice previews"
+  ],
+  [
+    "Baixar vídeo dublado",
+    "Download dubbed video"
+  ],
+  [
+    "Esta fala não pertence ao projeto.",
+    "This line does not belong to the project."
+  ],
+  [
+    "Escolha um modelo e idioma válidos para a dublagem.",
+    "Choose a valid dubbing model and language."
+  ],
+  [
+    "A referência de voz não pertence ao projeto.",
+    "The voice reference does not belong to the project."
+  ],
+  [
+    "Baixe os pesos do Demucs antes de separar o fundo no modo offline.",
+    "Download the Demucs weights before separating background audio offline."
+  ],
+  [
+    "Envie uma vez cada fala deste projeto.",
+    "Submit each line in this project exactly once."
+  ],
+  [
+    "Selecione uma referência para este personagem.",
+    "Select a voice reference for this character."
+  ],
+  [
+    "O Demucs falhou ao separar o áudio de fundo. Confira a instalação e os pesos do modelo.",
+    "Demucs could not separate the background audio. Check the installation and model weights."
+  ],
+  [
+    "Ajuste os tempos das falas. Use intervalos válidos e sem sobreposição.",
+    "Adjust the dialogue timings to use valid, non-overlapping ranges."
+  ],
+  [
+    "Extraindo áudio do vídeo…",
+    "Extracting audio from the video…"
+  ],
+  [
+    "Preparando o áudio para o Gemini…",
+    "Preparing audio for Gemini…"
+  ],
+  [
+    "Aguardando transcrição e personagens do Gemini…",
+    "Waiting for Gemini transcription and speaker identification…"
+  ],
+  [
+    "Transcrevendo com Whisper…",
+    "Transcribing with Whisper…"
+  ],
+  [
+    "Extraindo as referências de voz…",
+    "Extracting voice references…"
+  ],
+  [
+    "Identificando personagens pelas vozes…",
+    "Identifying speakers by voice…"
+  ],
+  [
+    "Preparando os cartões de fala…",
+    "Preparing dialogue cards…"
+  ],
+  [
+    "Reutilizando os áudios já gerados…",
+    "Reusing previously generated audio…"
+  ],
+  [
+    "Áudios gerados: {done} de {total}",
+    "Audio clips generated: {done} of {total}"
+  ],
+  [
+    "Conferindo os tempos e o roteiro…",
+    "Checking dialogue and timing…"
+  ],
+  [
+    "Sincronizando as falas com o vídeo…",
+    "Synchronizing dialogue with the video…"
+  ],
+  [
+    "Separando música e efeitos do áudio original…",
+    "Separating music and effects from the original audio…"
+  ],
+  [
+    "Mixando voz dublada e fundo…",
+    "Mixing dubbed voice and background…"
+  ],
+  [
+    "Renderizando a prévia dublada…",
+    "Rendering the dubbed preview…"
+  ],
+  [
+    "Exportando o vídeo final…",
+    "Exporting the final video…"
+  ],
+  [
+    "Prévia dublada pronta.",
+    "Dubbed preview ready."
+  ],
+  [
+    "Vídeo dublado pronto para baixar.",
+    "Dubbed video ready to download."
+  ],
+  [
+    "Regerando a fala…",
+    "Regenerating the line…"
+  ],
+  [
+    "Gerando a prévia dublada…",
+    "Generating the dubbed preview…"
+  ],
+  [
+    "Gerar prévia dublada",
+    "Generate dubbed preview"
+  ],
+  [
+    "Algumas falas foram cortadas nesta prévia. Ajuste os trechos destacados antes de exportar.",
+    "Some lines were cut short in this preview. Fix the highlighted lines before exporting."
+  ],
+  [
+    "Microfone",
+    "Microphone"
+  ],
+  [
+    "Ativar e testar microfone",
+    "Enable and test microphone"
+  ],
+  [
+    "Desligar microfone",
+    "Turn off microphone"
+  ],
+  [
+    "Nível do microfone",
+    "Microphone level"
+  ],
+  [
+    "Áudio guia",
+    "Guide audio"
+  ],
+  [
+    "Mudo",
+    "Muted"
+  ],
+  [
+    "Áudio original baixo (20%)",
+    "Quiet original audio (20%)"
+  ],
+  [
+    "Apenas música e efeitos (M&E)",
+    "Music and effects only (M&E)"
+  ],
+  [
+    "Prepare o guia M&E antes de gravar com essa opção.",
+    "Prepare the M&E guide before recording with this option."
+  ],
+  [
+    "Contagem para gravar",
+    "Recording countdown"
+  ],
+  [
+    "Cancelar gravação",
+    "Cancel recording"
+  ],
+  [
+    "Salvando take…",
+    "Saving take…"
+  ],
+  [
+    "Take gravado.",
+    "Take recorded."
+  ],
+  [
+    "Aguarde o vídeo ficar disponível no player.",
+    "Wait for the video to be ready in the player."
+  ],
+  [
+    "Use fones de ouvido para evitar que o áudio guia entre na gravação.",
+    "Use headphones to keep guide audio out of the recording."
+  ],
+  [
+    "Ajuste fino desta fala (ms)",
+    "Line offset (ms)"
+  ],
+  [
+    "Ajuste o início e o fim da fala para gravar até 180 segundos.",
+    "Adjust the line's start and end to record up to 180 seconds."
+  ],
+  [
+    "Take ativo",
+    "Active take"
+  ],
+  [
+    "Take {value_0}",
+    "Take {value_0}"
+  ],
+  [
+    "Excluir take",
+    "Delete take"
+  ],
+  [
+    "Gravar com contagem (3-2-1)",
+    "Record with countdown (3-2-1)"
+  ],
+  [
+    "Usar voz de IA nesta fala",
+    "Use AI voice for this line"
+  ],
+  [
+    "Usar take",
+    "Use take"
+  ],
+  [
+    "Instale o FFmpeg para salvar gravações.",
+    "Install FFmpeg to save recordings."
+  ],
+  [
+    "Formato de gravação não suportado.",
+    "Unsupported recording format."
+  ],
+  [
+    "Grave um trecho entre 0,05 e 180 segundos.",
+    "Record a take between 0.05 and 180 seconds."
+  ],
+  [
+    "Take não encontrado nesta fala.",
+    "Take not found for this line."
+  ],
+  [
+    "O atraso ajustado deixa uma gravação inteira antes do início do vídeo.",
+    "The offset moves a whole recording before the start of the video."
+  ],
+  [
+    "Adicionar fala",
+    "Add line"
+  ],
+  [
+    "Aplicar tratamento de voz nas gravações humanas (redução de ruído e nivelamento)",
+    "Process human recordings (reduce noise and balance levels)"
+  ],
+  [
+    "Use o roteiro atual para preservar os takes já gravados.",
+    "Use the current script to keep the recorded takes."
+  ],
+  [
+    "Estúdio de gravação humana (ADR)",
+    "Human recording studio (ADR)"
+  ],
+  [
+    "Preencha os tempos e a tradução de todas as falas de IA.",
+    "Enter timings and translations for every AI line."
+  ],
+  [
+    "Compensação de latência global (ms)",
+    "Global latency compensation (ms)"
+  ],
+  [
+    "Dublagem por IA",
+    "AI dubbing"
+  ],
+  [
+    "Dublagem convencional com humanos",
+    "Human dubbing"
+  ],
+  [
+    "Preparar guia M&E",
+    "Prepare M&E guide"
+  ],
+  [
+    "Esta fala usa um take humano na exportação.",
+    "This line uses a human take for export."
+  ],
+  [
+    "Guia M&E pronto.",
+    "M&E guide ready."
+  ],
+  [
+    "Preparando os takes humanos…",
+    "Preparing human takes…"
+  ],
+  [
+    "Preencha os tempos das falas antes de atualizar a transcrição.",
+    "Enter line timings before updating the transcript."
+  ],
+  [
+    "Encurtar fala com Gemini",
+    "Shorten line with Gemini"
+  ],
+  [
+    "Envia o texto desta fala e das vizinhas ao Gemini.",
+    "Sends this line and its neighboring text to Gemini."
+  ],
+  [
+    "Sugestões mais curtas",
+    "Shorter alternatives"
+  ],
+  [
+    "Usar esta fala",
+    "Use this line"
+  ],
+  [
+    "Depois de escolher, regenere a fala para conferir a duração.",
+    "Regenerate the selected line to check its duration."
+  ],
+  [
+    "A fala mudou. Peça uma nova sugestão.",
+    "This line changed. Request a new suggestion."
+  ],
+  [
+    "Buscando uma fala mais curta…",
+    "Looking for a shorter line…"
+  ],
+  [
+    "O Gemini não encontrou uma versão mais curta com o mesmo sentido.",
+    "Gemini could not find a shorter line with the same meaning."
+  ],
+  [
+    "O modo offline está ativo. Desative-o para pedir sugestões ao Gemini.",
+    "Turn off offline mode to request suggestions from Gemini."
+  ],
+  [
+    "Preencha o texto traduzido e confira o início e o fim desta fala.",
+    "Enter the translated text and check the line's start and end times."
+  ],
+  [
+    "Não foi possível encurtar a fala com Gemini. Confira a chave, a cota e o modelo.",
+    "Gemini could not shorten the line. Check your key, quota, and model."
+  ],
+  [
+    "O Gemini não retornou sugestões válidas para esta fala.",
+    "Gemini did not return valid suggestions for this line."
+  ],
+  [
+    "Encurtando fala {done} de {total} com Gemini…",
+    "Shortening line {done} of {total} with Gemini…"
+  ],
+  [
+    "Conferindo a duração das falas encurtadas…",
+    "Checking the duration of shortened lines…"
+  ],
+  [
+    "Falas encurtadas automaticamente: {value_0}",
+    "Lines shortened automatically: {value_0}"
+  ],
+  [
+    "Ajustando a dublagem para a prévia editada…",
+    "Adjusting the dub for the edited preview…"
+  ],
+  [
+    "Encurtar e sincronizar falas com Gemini na prévia",
+    "Shorten and synchronize lines with Gemini in previews"
+  ],
+  [
+    "Ao ativar, o texto das falas longas é enviado ao Gemini. O áudio é regerado no Studio.",
+    "When enabled, long dialogue is sent to Gemini and the Studio recreates the audio."
+  ],
+  [
+    "Revisando intervalos sem transcrição…",
+    "Checking untranscribed intervals…"
+  ],
+  [
+    "Revisar trechos sem transcrição",
+    "Check untranscribed intervals"
+  ],
+  [
+    "Fala recuperada",
+    "Recovered line"
+  ],
+  [
+    "EDIÇÃO",
+    "EDITING"
+  ],
+  [
+    "Editor de vídeo avançado",
+    "Advanced video editor"
+  ],
+  [
+    "Enviar ao editor de vídeo",
+    "Send to video editor"
+  ],
+  [
+    "Linha do tempo da montagem",
+    "Montage timeline"
+  ],
+  [
+    "Posição na linha do tempo",
+    "Timeline position"
+  ],
+  [
+    "Zoom",
+    "Zoom"
+  ],
+  [
+    "Vídeo principal",
+    "Main video"
+  ],
+  [
+    "Vídeo sobreposto",
+    "Video overlay"
+  ],
+  [
+    "Voz e áudio",
+    "Voice and audio"
+  ],
+  [
+    "Música e efeitos",
+    "Music and effects"
+  ],
+  [
+    "Novo projeto de vídeo",
+    "New video project"
+  ],
+  [
+    "Abrir no editor",
+    "Open in editor"
+  ],
+  [
+    "Envie um vídeo, áudio ou SRT de até 500 MB.",
+    "Upload a video, audio file or SRT up to 500 MB."
+  ],
+  [
+    "Adicionar no cursor",
+    "Add at playhead"
+  ],
+  [
+    "Adicione um vídeo ou áudio à linha do tempo.",
+    "Add a video or audio file to the timeline."
+  ],
+  [
+    "Aplicar ao clipe",
+    "Apply to clip"
+  ],
+  [
+    "Editar clipe",
+    "Edit clip"
+  ],
+  [
+    "Volume (%)",
+    "Volume (%)"
+  ],
+  [
+    "Posicione o cursor dentro do clipe para dividir.",
+    "Move the playhead inside the clip to split it."
+  ],
+  [
+    "Duração da legenda (s)",
+    "Caption duration (s)"
+  ],
+  [
+    "Preencha o texto e a duração da legenda.",
+    "Enter caption text and duration."
+  ],
+  [
+    "Fechar",
+    "Close"
+  ],
+  [
+    "Meu vídeo",
+    "My video"
+  ],
+  [
+    "Projeto de vídeo salvo.",
+    "Video project saved."
+  ],
+  [
+    "Selecione um clipe na linha do tempo.",
+    "Select a clip on the timeline."
+  ],
+  [
+    "Faixa",
+    "Track"
+  ],
+  [
+    "Início do corte (s)",
+    "Trim start (s)"
+  ],
+  [
+    "Fim do corte (s)",
+    "Trim end (s)"
+  ],
+  [
+    "Dividir no cursor",
+    "Split at playhead"
+  ],
+  [
+    "Remover clipe",
+    "Remove clip"
+  ],
+  [
+    "Exportar vídeo",
+    "Export video"
+  ],
+  [
+    "Projeto de vídeo",
+    "Video project"
+  ],
+  [
+    "Nome do clipe",
+    "Clip name"
+  ],
+  [
+    "Criar projeto",
+    "Create project"
+  ],
+  [
+    "Mídia do Studio",
+    "Studio media"
+  ],
+  [
+    "Prévia do arquivo",
+    "Preview asset"
+  ],
+  [
+    "Atualizar biblioteca",
+    "Refresh library"
+  ],
+  [
+    "Prévia da montagem",
+    "Montage preview"
+  ],
+  [
+    "Gere uma prévia para assistir à montagem.",
+    "Generate a preview to watch the montage."
+  ],
+  [
+    "Legenda SRT",
+    "SRT captions"
+  ],
+  [
+    "Vertical · 9:16",
+    "Vertical · 9:16"
+  ],
+  [
+    "Formato da montagem",
+    "Montage format"
+  ],
+  [
+    "Gerar prévia",
+    "Generate preview"
+  ],
+  [
+    "Projetos de vídeo",
+    "Video projects"
+  ],
+  [
+    "Todas as mídias",
+    "All media"
+  ],
+  [
+    "Tipo de mídia",
+    "Media type"
+  ],
+  [
+    "Buscar na biblioteca",
+    "Search the library"
+  ],
+  [
+    "Importar mídia",
+    "Import media"
+  ],
+  [
+    "Renderizando a prévia da montagem…",
+    "Rendering montage preview…"
+  ],
+  [
+    "Exportando a montagem…",
+    "Exporting montage…"
+  ],
+  [
+    "Prévia da montagem pronta.",
+    "Montage preview ready."
+  ],
+  [
+    "Montagem pronta para baixar.",
+    "Montage ready to download."
+  ],
+  [
+    "Projeto de vídeo não encontrado.",
+    "Video project not found."
+  ],
+  [
+    "Não foi possível ler as legendas SRT.",
+    "Could not read the SRT captions."
+  ],
+  [
+    "Escolha um formato de vídeo disponível.",
+    "Choose an available video format."
+  ],
+  [
+    "O projeto mudou em outra janela. Reabra o projeto para continuar.",
+    "The project changed in another window. Reopen it to continue."
+  ],
+  [
+    "Escolha um vídeo, áudio ou arquivo SRT do Studio.",
+    "Choose a Studio video, audio file, or SRT."
+  ],
+  [
+    "Não foi possível ler a duração do arquivo.",
+    "Could not read the file duration."
+  ],
+  [
+    "Informe tempos válidos para o clipe.",
+    "Enter valid clip timings."
+  ],
+  [
+    "O corte precisa estar dentro da duração do clipe.",
+    "The trim must be within the clip duration."
+  ],
+  [
+    "Confira a faixa e o volume do clipe.",
+    "Check the clip track and volume."
+  ],
+  [
+    "O formato do clipe não corresponde à faixa.",
+    "The clip type does not match the track."
+  ],
+  [
+    "Duplicar clipe",
+    "Duplicate clip"
+  ],
+  [
+    "Duplicar faixa",
+    "Duplicate track"
+  ],
+  [
+    "S · dividir no cursor",
+    "S · split at playhead"
+  ],
+  [
+    "Adicionar texto",
+    "Add text"
+  ],
+  [
+    "Texto na tela",
+    "Text overlay"
+  ],
+  [
+    "Duração do texto (s)",
+    "Text duration (s)"
+  ],
+  [
+    "Preencha o texto e informe uma duração válida.",
+    "Enter text and a valid duration."
+  ],
+  [
+    "A faixa selecionada está vazia.",
+    "The selected track is empty."
+  ],
+  [
+    "Pitch (semitons)",
+    "Pitch (semitones)"
+  ],
+  [
+    "Tamanho da fonte",
+    "Font size"
+  ],
+  [
+    "Separar áudio do vídeo",
+    "Separate video audio"
+  ],
+  [
+    "Escolha um pitch entre -12 e +12 semitons.",
+    "Choose a pitch between -12 and +12 semitones."
+  ],
+  [
+    "Preencha o texto e escolha um tamanho de fonte válido.",
+    "Enter text and choose a valid font size."
+  ],
+  [
+    "Pitch e equalizador",
+    "Pitch and equalizer"
+  ],
+  [
+    "Graves",
+    "Bass"
+  ],
+  [
+    "Médios",
+    "Midrange"
+  ],
+  [
+    "Agudos",
+    "Treble"
+  ],
+  [
+    "Restaurar padrão",
+    "Restore defaults"
+  ],
+  [
+    "Escolha um pitch entre -48 e +48 semitons.",
+    "Choose a pitch between -48 and +48 semitones."
+  ],
+  [
+    "Ajuste o equalizador entre -12 e +12 dB por faixa.",
+    "Set each equalizer band between -12 and +12 dB."
+  ],
+  [
+    "Efeitos de vídeo",
+    "Video effects"
+  ],
+  [
+    "Adicionar faixa de áudio",
+    "Add audio track"
+  ],
+  [
+    "Selecione um clipe do vídeo principal.",
+    "Select a clip on the main video track."
+  ],
+  [
+    "Ativar efeito",
+    "Enable effect"
+  ],
+  [
+    "Cor das sombras",
+    "Shadow color"
+  ],
+  [
+    "Cor das luzes",
+    "Highlight color"
+  ],
+  [
+    "Gere uma prévia para conferir os efeitos aplicados.",
+    "Generate a preview to check the applied effects."
+  ],
+  [
+    "Matiz (°)",
+    "Hue (°)"
+  ],
+  [
+    "Saturação (%)",
+    "Saturation (%)"
+  ],
+  [
+    "Luminosidade HSL (%)",
+    "HSL lightness (%)"
+  ],
+  [
+    "Luminosidade L*",
+    "L* lightness"
+  ],
+  [
+    "Verde ↔ vermelho (a*)",
+    "Green ↔ red (a*)"
+  ],
+  [
+    "Azul ↔ amarelo (b*)",
+    "Blue ↔ yellow (b*)"
+  ],
+  [
+    "Inverter luminosidade (%)",
+    "Invert lightness (%)"
+  ],
+  [
+    "Intensidade do mapa (%)",
+    "Map strength (%)"
+  ],
+  [
+    "Pinch ↔ Punch",
+    "Pinch ↔ Punch"
+  ],
+  [
+    "Raio do efeito (%)",
+    "Effect radius (%)"
+  ],
+  [
+    "Centro horizontal (%)",
+    "Horizontal center (%)"
+  ],
+  [
+    "Centro vertical (%)",
+    "Vertical center (%)"
+  ],
+  [
+    "Rotação do redemoinho (°)",
+    "Swirl rotation (°)"
+  ],
+  [
+    "Escolha efeitos de vídeo disponíveis.",
+    "Choose available video effects."
+  ],
+  [
+    "Confira as configurações dos efeitos de vídeo.",
+    "Check video effect settings."
+  ],
+  [
+    "Use uma cor hexadecimal no mapa de gradiente, como #20243F.",
+    "Use a hexadecimal gradient color such as #20243F."
+  ],
+  [
+    "Mudar um controle ativa o efeito. A prévia abre no ponto do clipe.",
+    "Adjusting a control enables the effect. The preview opens at the clip."
+  ],
+  [
+    "Aplicar e gerar prévia",
+    "Apply and generate preview"
+  ]
 ]

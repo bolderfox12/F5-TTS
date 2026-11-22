@@ -19,11 +19,13 @@ from f5_tts.studio.local_pages import register_local_pages
 from f5_tts.studio.microphone import Microphone
 from f5_tts.studio.model_pages import register_model_pages
 from f5_tts.studio.music_preview import music_preview
+from f5_tts.studio.montage_page import EDITOR_PATH, register_montage_page, send_to_video_editor
 from f5_tts.studio.reference_turns import reference_turn_editor
 from f5_tts.studio.script_review import local_review_models, preferred_review_model
 from f5_tts.studio.service import StudioService
 from f5_tts.studio.story_pages import register_story_pages
 from f5_tts.studio.training_pages import register_training_pages
+from f5_tts.studio.video_dubbing_page import register_video_dubbing_page
 
 
 CSS = """
@@ -72,7 +74,7 @@ def register_pages(service):
                 ui.label(title).classes("text-xs font-semibold uppercase tracking-wide")
             return ui.label(initial).classes("text-sm font-medium break-words")
 
-    def shell(section):
+    def shell(section, *, local_navigation=None):
         ui.context.client.page.language = service.interface_language()
         ui.colors(primary="#137d80", secondary="#294d5b", accent="#2bb5a7")
         ui.add_css(CSS)
@@ -92,6 +94,14 @@ def register_pages(service):
                     ],
                 ),
                 (
+                    "DUBLAGEM",
+                    [
+                        ("Dublagem por IA", "movie", "/video-dubbing"),
+                        ("Dublagem convencional com humanos", "mic", "/video-dubbing-human"),
+                    ],
+                ),
+                ("EDIÇÃO", [("Editor de vídeo avançado", "video_library", EDITOR_PATH)]),
+                (
                     "PROJETOS",
                     [
                         ("Histórias e personagens", "auto_stories", "/stories"),
@@ -110,13 +120,19 @@ def register_pages(service):
                 ),
                 ("SISTEMA", [("Treinar uma voz", "school", "/training"), ("Configurações", "tune", "/settings")]),
             ]
-            active_sections = {"Regravar com outra voz": "Regravar áudio"}
+            active_sections = {"Regravar com outra voz": "Regravar áudio", "Dublagem de vídeo": "Dublagem por IA"}
+
+            def navigate(target):
+                if local_navigation and target in local_navigation:
+                    return local_navigation[target]()
+                return ui.navigate.to(target)
+
             for group_name, items in groups:
                 ui.label(t(group_name)).classes("studio-nav-group")
                 for title, icon, route in items:
                     active = title == active_sections.get(section, section)
                     button = (
-                        ui.button(t(title), icon=icon, on_click=lambda target=route: ui.navigate.to(target))
+                        ui.button(t(title), icon=icon, on_click=lambda target=route: navigate(target))
                         .props("flat no-caps")
                         .classes("studio-nav" + (" studio-nav-active" if active else ""))
                     )
@@ -187,6 +203,8 @@ def register_pages(service):
         ).props('accept=".wav,.mp3,.flac,.ogg,.m4a,.aac"').classes("w-full")
 
     register_local_pages(service, shell, action, audio_upload)
+    register_video_dubbing_page(service, shell, action)
+    register_montage_page(service, shell, action)
     register_model_pages(service, shell, action)
     register_story_pages(service, shell, action)
     register_training_pages(service, shell, action, audio_upload)
@@ -839,6 +857,7 @@ def register_pages(service):
                                 await player.load(result["path"], service.audio_waveform)
                                 await preview_narration(result["path"])
                                 download.enable()
+                                send_audio.enable()
                                 status.set_text(
                                     t(
                                         "Áudio {value_0} pronto. Você também pode encontrá-lo no Histórico.",
@@ -880,6 +899,17 @@ def register_pages(service):
                             t("Baixar áudio"), icon="download", on_click=lambda: ui.download.file(generated["path"])
                         ).props("flat no-caps")
                         download.disable()
+                        send_audio = ui.button(
+                            t("Enviar ao editor de vídeo"),
+                            icon="video_library",
+                            on_click=lambda: send_to_video_editor(
+                                service,
+                                action,
+                                [(generated["path"], generated.get("text", "")[:80])],
+                                generated.get("text", "")[:70] or t("Áudio gerado"),
+                            ),
+                        ).props("outline no-caps")
+                        send_audio.disable()
                         preview_narration = music_preview(service, t, action)
                         preview_narration.register_refresh(music_library_refresh)
                         ui.separator()

@@ -619,6 +619,9 @@ class StudioRouteTests(unittest.TestCase):
                     ("/projects", "Histórias com"),
                     ("/transcription", "Do áudio"),
                     ("/revoice", "Outra voz"),
+                    ("/video-dubbing", "Dublagem por IA"),
+                    ("/video-dubbing-human", "Estúdio de gravação humana"),
+                    ("/video-editor", "Editor de vídeo avançado"),
                     ("/audio-tools", "Prepare e exporte"),
                 ]:
                     connection = http.client.HTTPConnection("127.0.0.1", 17862, timeout=10)

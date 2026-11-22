@@ -17,9 +17,19 @@ import torchaudio
 
 from f5_tts.audio import local_audio_input
 from f5_tts.studio import chatterbox_backend as chatterbox
+from f5_tts.studio.transcription_gaps import merge_recovered, recovery_windows
 
 
-LANGUAGES = {"pt": "por_Latn", "en": "eng_Latn", "es": "spa_Latn", "fr": "fra_Latn", "de": "deu_Latn"}
+LANGUAGES = {
+    "pt": "por_Latn",
+    "en": "eng_Latn",
+    "es": "spa_Latn",
+    "fr": "fra_Latn",
+    "de": "deu_Latn",
+    "ko": "kor_Hang",
+    "ja": "jpn_Jpan",
+    "zh": "zho_Hans",
+}
 ASR_MODELS = {"openai/whisper-small", "openai/whisper-large-v3-turbo"}
 
 
@@ -361,7 +371,17 @@ class LocalTools:
         source = self.validate_reference(str(self._managed_asset(source)), allow_external=True)
         return self._transcribe_audio(source, "", "openai/whisper-small", save_record=False)
 
-    def _transcribe_audio(self, source, language, model_id, *, save_record):
+    def _transcribe_audio(
+        self,
+        source,
+        language,
+        model_id,
+        *,
+        save_record,
+        return_segments=False,
+        recover_missing=False,
+        on_recovery=None,
+    ):
         if model_id not in ASR_MODELS:
             raise ValueError("Escolha um modelo de transcrição da lista.")
         if language and language not in LANGUAGES:
@@ -393,25 +413,46 @@ class LocalTools:
             duration = len(samples) / 16000
             if duration < 0.1:
                 raise ValueError("O arquivo não contém áudio suficiente.")
-            result = asr(
-                {"array": samples, "sampling_rate": 16000},
-                chunk_length_s=30,
-                batch_size=1,
-                return_timestamps=True,
-                generate_kwargs={"task": "transcribe", **({"language": language} if language else {})},
-            )
-            chunks = result.get("chunks") or [{"text": result.get("text", ""), "timestamp": (0, duration)}]
-            segments = []
-            for chunk in chunks:
-                if not chunk["text"].strip():
-                    continue
-                start, end = chunk.get("timestamp", (0, duration))
-                start = max(segments[-1]["end"] if segments else 0, float(start or 0))
-                end = min(duration, float(end if end is not None else duration))
-                if end > start:
-                    segments.append({"start": start, "end": end, "text": chunk["text"].strip()})
+
+            def recognize(audio, offset=0, *, retry=False):
+                length = len(audio) / 16000
+                options = {"task": "transcribe", **({"language": language} if language else {})}
+                if retry:
+                    options.update(condition_on_prev_tokens=False, no_speech_threshold=0.8)
+                result = asr(
+                    {"array": audio, "sampling_rate": 16000},
+                    chunk_length_s=30,
+                    batch_size=1,
+                    return_timestamps=True,
+                    generate_kwargs=options,
+                )
+                chunks = result.get("chunks") or [{"text": result.get("text", ""), "timestamp": (0, length)}]
+                rows = []
+                for chunk in chunks:
+                    text = chunk["text"].strip()
+                    if not text:
+                        continue
+                    start, end = chunk.get("timestamp", (0, length))
+                    start = max(rows[-1]["end"] if rows else offset, offset + float(start or 0))
+                    end = offset + min(length, float(end if end is not None else length))
+                    if end > start:
+                        rows.append({"start": start, "end": end, "text": text})
+                return rows
+
+            segments = recognize(samples)
+            if recover_missing:
+                windows = recovery_windows(samples, 16000, segments)
+                if windows and on_recovery:
+                    on_recovery()
+                additions = []
+                for start, end in windows:
+                    first = round(start * 16000)
+                    additions.extend(recognize(samples[first : round(end * 16000)], first / 16000, retry=True))
+                segments = merge_recovered(segments, additions, windows)
             if not segments:
                 raise ValueError("Não foi reconhecida fala. Confira o arquivo e o idioma.")
+            if return_segments:
+                return segments
             if not save_record:
                 return " ".join(segment["text"] for segment in segments)
             return self.store_transcript(
@@ -434,17 +475,33 @@ class LocalTools:
         if source_language not in LANGUAGES or target_language not in LANGUAGES or source_language == target_language:
             raise ValueError("Escolha idiomas de origem e destino diferentes.")
         record = self.transcript(identifier)
+        translated = self.translate_segments(record["segments"], source_language, target_language)
+        return self.store_transcript(
+            {
+                "source": record["source"],
+                "name": record["name"] + " · " + target_language,
+                "language": target_language,
+                "model": "facebook/nllb-200-distilled-600M",
+                "segments": translated,
+                "translated_from": identifier,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+    def translate_segments(self, segments, source_language, target_language):
+        if source_language not in LANGUAGES or target_language not in LANGUAGES or source_language == target_language:
+            raise ValueError("Escolha idiomas de origem e destino diferentes.")
         if not self._operation.acquire(blocking=False):
             raise ValueError("Aguarde a operação em execução.")
         try:
             self._release_speech_model()
             translator = getattr(self, "_translation_factory", None)
             if translator is None:
-                from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+                from transformers import AutoModelForSeq2SeqLM, NllbTokenizerFast
 
                 offline = bool(self.read().get("offline", False))
                 model_id = "facebook/nllb-200-distilled-600M"
-                tokenizer = AutoTokenizer.from_pretrained(
+                tokenizer = NllbTokenizerFast.from_pretrained(
                     model_id, src_lang=LANGUAGES[source_language], local_files_only=offline
                 )
                 model = AutoModelForSeq2SeqLM.from_pretrained(model_id, local_files_only=offline)
@@ -463,18 +520,7 @@ class LocalTools:
                         )
                     return tokenizer.batch_decode(output, skip_special_tokens=True)[0]
 
-            translated = [{**segment, "text": translator(segment["text"])} for segment in record["segments"]]
-            return self.store_transcript(
-                {
-                    "source": record["source"],
-                    "name": record["name"] + " · " + target_language,
-                    "language": target_language,
-                    "model": "facebook/nllb-200-distilled-600M",
-                    "segments": translated,
-                    "translated_from": identifier,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                }
-            )
+            return [{**segment, "text": translator(segment["text"])} for segment in segments]
         finally:
             self._operation.release()
             gc.collect()

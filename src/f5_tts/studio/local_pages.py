@@ -6,6 +6,7 @@ from threading import Event
 from nicegui import ui
 
 from f5_tts.studio import chatterbox_backend as chatterbox
+from f5_tts.studio.montage_page import send_to_video_editor
 from f5_tts.studio.audio_timeline import AudioTimeline
 from f5_tts.studio.i18n import localized_options
 from f5_tts.studio.music_preview import music_preview
@@ -223,6 +224,18 @@ def register_local_pages(service, shell, action, audio_upload):
                 @ui.refreshable
                 def downloads():
                     if state["mix"]:
+
+                        def send_mix():
+                            mix = state["mix"]
+                            assets = [(mix["path"], t("Projetos de narração"))]
+                            if mix.get("srt") and Path(mix["srt"]).is_file() and Path(mix["srt"]).stat().st_size:
+                                assets.append((mix["srt"], t("Legendas")))
+                            name = service.narration(state["project"])["name"]
+                            send_to_video_editor(service, action, assets, name)
+
+                        ui.button(t("Enviar ao editor de vídeo"), icon="video_library", on_click=send_mix).props(
+                            "outline no-caps"
+                        )
                         ui.button(
                             t("Baixar narração WAV"),
                             icon="download",
