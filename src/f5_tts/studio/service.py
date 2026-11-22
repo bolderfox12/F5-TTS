@@ -784,7 +784,7 @@ class StudioService(StoryTools, LocalTools):
                 raise chatterbox.SynthesisCancelled
             if _part_progress is not None:
                 index, total = _part_progress
-                percent = (100 * index + percent) / total
+                percent = 90 * (index + percent / 100) / total
                 message = f"Trecho {index + 1} de {total} · {message}"
             self.set_generation_status(running, percent, message)
 
@@ -964,6 +964,7 @@ class StudioService(StoryTools, LocalTools):
             raise ValueError("Aguarde a operação atual ou pare o treinamento antes de gerar áudio.")
         target = self.outputs / f"{uuid4().hex}.{output_format}"
         try:
+            self.set_generation_status(True, 1, "Validando os trechos.")
             voices = {voice["id"]: voice for voice in self.read()["voices"]}
             for part in parts:
                 voice_id = part.get("voice_id")
@@ -994,6 +995,9 @@ class StudioService(StoryTools, LocalTools):
                             _part_directory=directory,
                             _part_progress=(index, len(parts)),
                         )
+                        self.set_generation_status(
+                            True, 90 * (index + 1) / len(parts), f"Trecho {index + 1} de {len(parts)} pronto."
+                        )
                         samples, _ = sf.read(last["path"], dtype="float32")
                         audio.write(samples)
                         spoken.append(last["spoken_text"])
@@ -1001,7 +1005,9 @@ class StudioService(StoryTools, LocalTools):
                         Path(last["path"]).unlink()
                 if cancel_event is not None and cancel_event.is_set():
                     raise chatterbox.SynthesisCancelled
+                self.set_generation_status(True, 92, "Finalizando e exportando o áudio.")
                 self._export_generated_audio(joined, target, output_format, output_quality, noise_reduction, stereo)
+            self.set_generation_status(True, 98, "Registrando o áudio concluído.")
             entry = {
                 **last,
                 "id": target.stem,
@@ -1026,6 +1032,7 @@ class StudioService(StoryTools, LocalTools):
                     pass
             if cancel_event is not None and cancel_event.is_set():
                 raise chatterbox.SynthesisCancelled
+            self.set_generation_status(True, 99, "Registrando o áudio concluído.")
             self._save_generation(entry)
             self.set_generation_status(False, 100, "Geração concluída.")
             return entry

@@ -4805,6 +4805,9 @@
     "生成完成。",
     "生成が完了しました。"
   ],
+  ["Validando os trechos.", "Validating the parts."],
+  ["Trecho {value_0} de {value_1} pronto.", "Part {value_0} of {value_1} ready."],
+  ["Registrando o áudio concluído.", "Saving the completed audio."],
   [
     "A geração não foi concluída.",
     "Generation did not complete.",
