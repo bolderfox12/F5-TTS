@@ -1,428 +1,237 @@
 # F5 Studio
 
 [![Python](https://img.shields.io/badge/Python-3.11%E2%80%933.15-brightgreen)](pyproject.toml)
-[![Release](https://img.shields.io/github/v/release/bolderfox12/F5-TTS)](https://github.com/bolderfox12/F5-TTS/releases/latest)
-[![License: MIT](https://img.shields.io/badge/Code-MIT-blue.svg)](LICENSE)
+[![Licença MIT](https://img.shields.io/badge/C%C3%B3digo-MIT-blue)](LICENSE)
 
-A local web studio for creating speech, saved voices, narrated stories, subtitles, and voice models.
-F5 Studio uses [F5-TTS](https://github.com/SWivid/F5-TTS) for speech synthesis and runs processing on your computer.
+Studio local para **criar áudio, dublar vídeos com IA ou com voz humana e editar a montagem**.
+A interface usa NiceGUI e abre no navegador. A branch `main` contém os recursos descritos aqui.
+O número de versão declarado pelo pacote continua sendo **1.3.6**. [Histórico de versões](CHANGELOG.md)
 
-**Version 1.3.6** adds a persistent reference library, AI-assisted script and reference review,
-per-turn voice assignment, and security fixes.
-See the [complete guide in Brazilian Portuguese](docs/guia-studio.md), [release notes](docs/releases/v1.3.6.md),
-and [changelog](CHANGELOG.md).
+- [Instalação](#instalação)
+- [Dublagem por IA e gravação humana](#dublagem-por-ia-e-gravação-humana)
+- [Editor de vídeo avançado](#editor-de-vídeo-avançado)
+- [Criação de áudio, modelos e treinamento](#criação-de-áudio-modelos-e-treinamento)
+- [Workspace, atualização e diagnóstico](#workspace-atualização-e-diagnóstico)
 
-## What you can do
+## Instalação
 
-| Page | Purpose |
-| --- | --- |
-| Create audio | Record or upload a reference, select a voice and model, then export WAV or MP3 with quality, denoising, and stereo options. Track inference progress and live CPU, GPU/VRAM, RAM, and disk usage. |
-| My voices | Keep named reference recordings and transcripts for reuse. |
-| My models | Inspect model files and disk usage, register checkpoints, export INT8 copies, and remove unused managed weights. |
-| Audio library | Find and filter generated audio and voice references; preview waveforms, trim audio into a new WAV, save clips as voices, copy, move, download, or delete files. |
-| Stories and characters | Build a cast, assign each character a voice and model, write dialogue, and export the complete story. |
-| Narration projects | Work with paragraph-based narration, voice assignments, segment edits, pauses, and WAV/SRT export. |
-| Transcription and subtitles | Transcribe locally, correct segments, translate subtitles, and export TXT/SRT. |
-| Revoice | Create a new narration from revised or translated text with the chosen voice and model. |
-| Audio tools | Convert WAV/MP3, adjust volume, reduce steady noise, and trim silence with FFmpeg, with in-page explanations for each effect. |
-| Train a voice | Import and review multilingual examples, train with one or more CUDA GPUs, monitor progress and resource usage, compare checkpoints, and publish or quantize models. |
-| History | Replay and download generated audio, with its model and generation settings. |
-| Settings | Choose CPU/CUDA, speed, generation steps, pronunciation rules, and cache preferences. |
+### Requisitos
 
-The application listens on **http://127.0.0.1:7862** and is intended for one local user.
-No paid API keys are needed for these features. Model weights require an initial download.
+- **Git**, **FFmpeg** e **FFprobe** no `PATH`. Para incorporar legendas ou texto, use um FFmpeg com `subtitles` e `drawtext`. O filtro `rubberband`, quando disponível, melhora as alterações extremas de pitch.
+- **Python 3.15** para o launcher deste repositório. O pacote declara suporte de Python 3.11 a 3.15. A configuração de referência atual do Studio foi usada com **Python 3.15.2 no Linux/WSL2**.
+- **uv** para seguir os comandos abaixo. [Instalação do uv](https://docs.astral.sh/uv/getting-started/installation/)
+- **Voz por IA na dublagem** usa o ambiente separado do Chatterbox. O Whisper também usa esse ambiente para identificar personagens. **Música e efeitos separados do original** usam o Demucs opcional. A gravação humana funciona localmente no navegador.
 
-## Install and open Studio
-
-### Requirements
-
-- Git and FFmpeg/ffprobe available on `PATH`.
-- Python **3.11–3.15**, as declared by the package. **Python 3.12** is the locally validated setup.
-- On Linux, `libsndfile`; for NVIDIA acceleration, a driver compatible with the PyTorch CUDA build.
-
-Ubuntu/Debian:
+No Ubuntu, Debian ou WSL2:
 
 ```bash
-sudo apt-get update
-sudo apt-get install ffmpeg libsndfile1
+sudo apt update
+sudo apt install git ffmpeg libsndfile1 build-essential
 ```
 
-On Windows, install FFmpeg and add its `bin` folder to `PATH`. On macOS with Homebrew,
-use `brew install ffmpeg libsndfile`.
+No Windows, instale Git e adicione a pasta `bin` do FFmpeg ao `PATH`. No macOS, as bibliotecas de
+sistema podem ser instaladas com `brew install ffmpeg libsndfile`. Em Linux, instale
+`fonts-noto-cjk` se faltarem caracteres em coreano, japonês ou chinês na interface ou nas legendas.
 
-For Chinese or Japanese in a Linux browser, install CJK fonts if needed:
-`sudo apt-get install fonts-noto-cjk`. Windows/macOS browsers use their system font fallback.
+### Studio no Linux ou WSL2
 
-### Create an isolated environment
+O exemplo instala o backend CPU. Para NVIDIA, substitua `--torch-backend=cpu` por um backend
+CUDA correspondente ao driver, como `--torch-backend=cu132` quando compatível. Mantenha
+PyTorch e TorchAudio no mesmo ambiente e no mesmo backend. [Guia do PyTorch no uv](https://docs.astral.sh/uv/guides/integration/pytorch/)
 
 ```bash
 git clone https://github.com/bolderfox12/F5-TTS.git
 cd F5-TTS
+uv venv --python 3.15 .studio/interface-python315
+uv pip install --python .studio/interface-python315/bin/python --torch-backend=cpu -e ".[studio]"
+uv pip check --python .studio/interface-python315/bin/python
+bash iniciar-studio.sh
 ```
 
-Windows PowerShell:
+Abra [http://127.0.0.1:7862](http://127.0.0.1:7862). Use
+`bash iniciar-studio.sh --port 7872 --no-browser` para iniciar na porta 7872 e abrir
+[http://127.0.0.1:7872](http://127.0.0.1:7872) manualmente.
+
+### Equivalente no Windows PowerShell
+
+Execute no clone do repositório, com as dependências de sistema instaladas:
 
 ```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip setuptools wheel
+uv venv --python 3.15 .studio/interface-python315
+$studioPython = ".studio/interface-python315/Scripts/python.exe"
+uv pip install --python $studioPython --torch-backend=cpu -e ".[studio]"
+uv pip check --python $studioPython
+& $studioPython -m f5_tts.studio.app --workspace .studio
 ```
 
-Linux/macOS:
+Em outro ambiente com o extra `studio` instalado, também é possível iniciar com
+`f5-tts_studio --workspace .studio`. Esse comando aceita `--port` e `--no-browser`.
+
+### Chatterbox Multilingual V3
+
+Crie o segundo ambiente dentro do workspace. O exemplo usa o commit do Chatterbox validado neste
+Studio. Para CUDA, escolha um backend compatível nos dois ambientes. [Código do Chatterbox validado](https://github.com/resemble-ai/chatterbox/commit/ab55923c27757c90cfcc407baa57dc25a7d25217)
 
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip setuptools wheel
+uv venv --python 3.15 .studio/chatterbox/.venv
+uv pip install --python .studio/chatterbox/.venv/bin/python --torch-backend=cpu \
+  "torch>=2.15.0" "torchaudio>=2.10.0" \
+  "chatterbox-tts @ git+https://github.com/resemble-ai/chatterbox.git@ab55923c27757c90cfcc407baa57dc25a7d25217"
+uv pip check --python .studio/chatterbox/.venv/bin/python
+.studio/chatterbox/.venv/bin/python -c "from chatterbox.mtl_tts import ChatterboxMultilingualTTS"
 ```
 
-### Install the application
+No Windows, use `.studio/chatterbox/.venv/Scripts/python.exe` nos comandos após `uv venv`.
+Com outro workspace, use a estrutura `<workspace>/chatterbox/.venv`.
 
-Install PyTorch for your hardware using the [official installation selector](https://pytorch.org/get-started/locally/).
-For CPU-only use:
+### Demucs para música e efeitos
+
+O ambiente abaixo foi validado em CPU. O Studio procura o executável em
+`<workspace>/demucs/.venv`, no `PATH` ou no caminho informado em `F5_STUDIO_DEMUCS`.
+Os pesos `htdemucs` são baixados no primeiro uso. [Projeto Demucs](https://github.com/facebookresearch/demucs)
 
 ```bash
-python -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+uv venv --python 3.12 .studio/demucs/.venv
+uv pip install --python .studio/demucs/.venv/bin/python --torch-backend=cpu \
+  "torch==2.8.0" "torchaudio==2.8.0" "demucs==4.0.1" soundfile
+uv pip check --python .studio/demucs/.venv/bin/python
 ```
 
-Then install this checkout and open the web interface:
+No Windows, use `.studio/demucs/.venv/Scripts/python.exe`. Para exportar só com as vozes,
+deixe **Áudio de fundo** em 0%.
 
-```bash
-python -m pip install -e ".[studio]"
-python -m pip check
-f5-tts_studio
-```
+## Dublagem por IA e gravação humana
 
-Open **http://127.0.0.1:7862**. If the Windows environment is not activated, use
-`.\.venv\Scripts\python.exe` and `.\.venv\Scripts\f5-tts_studio.exe`.
+Use **Dublagem → Dublagem por IA** ou **Dublagem convencional com humanos**. O vídeo,
+o roteiro e os takes são compartilhados ao alternar de modo dentro da sessão aberta.
 
-Startup options:
+- **Entrada e transcrição.** Importe MP4, MOV, MKV ou WebM de até **500 MB**. Escolha
+  Whisper Small, Whisper Turbo ou Gemini. A segunda passada em intervalos com som pode recuperar
+  falas ausentes. Os cartões identificam os trechos recuperados e permitem corrigir texto, tempos
+  e personagem. Ouça e escolha a referência de voz de cada personagem.
+- **Tradução e síntese.** Escolha NLLB local ou Gemini, independentemente do transcritor.
+  A dublagem oferece português, inglês, espanhol, francês, alemão, coreano, japonês e mandarim
+  em caracteres simplificados. O Chatterbox ou um modelo registrado gera as falas. Ouça, edite
+  e regenere cada trecho. A compatibilidade de idioma depende do modelo escolhido.
+- **Ajuste de duração.** Os cartões medem quanto a fala excede a janela. O ajuste de velocidade
+  da IA vai até **1,30×**. O Gemini pode sugerir expressões mais curtas por fala ou testá-las
+  automaticamente na prévia. O Studio mede o áudio regerado antes de aplicar uma alternativa.
+  A sincronização usa os tempos da fala na timeline.
+- **Gravação humana (ADR).** Escolha o microfone, confira o medidor, grave com bipes e contagem
+  3–2–1 e acompanhe o tempo restante. Use o guia mudo, o original a 20% ou música e efeitos do
+  Demucs. Grave vários takes, ouça e escolha o ativo. É possível combinar IA e takes humanos
+  na mesma mixagem, com ajuste de latência global e por fala.
+- **Mixagem e saída.** Controle separadamente voz e trilha de fundo, ative o tratamento de
+  áudio quando necessário e acompanhe o progresso. Compare o original com o dublado antes de
+  exportar. A exportação direta preserva o fluxo de vídeo e gera MP4 ou MKV, conforme o codec,
+  além do SRT. O editor de dublagem também permite cortes, clipes extras, transição por
+  escurecimento, música e legendas ajustáveis.
 
-```bash
-f5-tts_studio --no-browser
-f5-tts_studio --port 7870
-f5-tts_studio --workspace /path/to/your/workspace
-```
+No modo Gemini, use a chave configurada no Studio ou `GEMINI_API_KEY`. A transcrição envia
+o áudio extraído ao Google. A tradução e o encurtamento enviam texto. Whisper, NLLB, Chatterbox,
+Demucs e FFmpeg rodam na máquina. Use o modo offline após baixar os pesos locais.
 
-Install from this fork's checkout or its release wheel to get the Studio changes.
-The ordinary PyPI package name alone does not select this fork.
+[Passo a passo da dublagem e do ADR](docs/guia-studio.md#dublagem-de-vídeo)
 
-## Choose your interface language
+## Editor de vídeo avançado
 
-Use the language selector in the page header. Available languages include English, Brazilian
-Portuguese, Spanish, French, German, Simplified Chinese, and Japanese.
+Abra **Edição → Editor de vídeo avançado**. Crie ou reabra uma montagem salva, importe
+arquivos ou busque vídeos, áudio e SRT da biblioteca do Studio.
 
-The preference is saved in the workspace and applied when the page reloads. Menus, forms,
-notifications, the recorder, training controls, and built-in examples use local translations;
-no translation service or additional language model is required.
+- **Enviar ao editor de vídeo** leva resultados de **Criar áudio**, **Dublagem**, **Projetos de
+  narração**, **Histórias e personagens** e **Biblioteca de áudios** para um projeto novo ou existente.
+- A **timeline** reúne vídeo principal, vídeo sobreposto, faixas de áudio, texto e legendas.
+  Arraste clipes, aumente o zoom, ajuste cortes ou pressione **S** para dividir no cursor.
+  O botão direito permite duplicar clipes e criar cópias de faixas de áudio.
+- Vídeos com som entram com imagem e áudio vinculados. Adicione faixas extras, ajuste volumes
+  e use **Efeitos de áudio** para configurar a altura do som de **−48 a +48 semitons** e graves,
+  médios e agudos de **−12 a +12 dB**.
+- Use **Adicionar texto** para títulos editáveis ou crie legendas na própria timeline.
+  No vídeo principal, **Efeitos de vídeo** oferece ajuste HSL, ajuste Lab com inversão de
+  luminosidade, mapa de gradiente, contração e expansão e redemoinho.
+  Os efeitos são ajustáveis e combináveis.
+  **Aplicar e gerar prévia** abre a montagem no trecho alterado.
+- **Transições** permite dissolver, entrar a partir do preto ou deslizar o vídeo. Para áudio,
+  ajuste a entrada e saída gradual ou mescle o clipe com o anterior da mesma faixa.
+- Exporte **MP4 e SRT** em HD, Full HD ou formato vertical.
 
-Story text, character names, saved voice names, and model IDs remain as you entered them.
-The language of generated speech depends on the chosen checkpoint and your script.
+[Passo a passo da montagem](docs/guia-studio.md#editor-de-vídeo-avançado)
 
-## Record a voice reference
+## Criação de áudio, modelos e treinamento
 
-In **Create audio**, **My voices**, or the training checkpoint comparison:
+| Área | Recursos |
+| --- | --- |
+| **Criar áudio e regravar** | Referências gravadas ou importadas, voz por trecho, síntese F5-TTS ou Chatterbox, exportação WAV/MP3 e monitoramento da geração. |
+| **Minhas vozes e biblioteca** | Referências salvas, forma de onda, cortes, busca, organização de arquivos e histórico de geração. |
+| **Histórias e narração** | Elenco com vozes e modelos por personagem, revisão de blocos, pausas e exportação de áudio, roteiro e legendas conforme o projeto. |
+| **Transcrição e ferramentas de áudio** | Whisper, tradução NLLB, revisão e exportação TXT/SRT, conversão, nivelamento e redução de ruído pelo FFmpeg. |
+| **Revisão e consoles de IA** | Revisão com Gemini, OpenAI, Claude ou Ollama local. Análise de referência e geração de mídia pelos provedores disponíveis na interface. |
+| **Meus modelos e treinamento** | Cadastro de checkpoints e vocabulários, comparação de versões, treino guiado com CUDA e exportação INT8 para CPU x86. |
 
-1. Click **Record with microphone** and allow the browser to use your microphone.
-2. Speak, then click **Stop recording**. The automatic limit is 30 seconds; prefer up to 12 seconds.
-3. Listen to the preview and click **Use this recording**.
-4. Enter its transcript if known, then generate audio or save the voice.
+O seletor no cabeçalho oferece português do Brasil, inglês, espanhol, francês, alemão,
+chinês simplificado e japonês para a interface. Nas referências de voz, é possível medir
+nível e clipping, recortar a gravação e transcrevê-la com Whisper. Use o painel de revisão
+para testar sugestões antes de aplicar o roteiro. Os consoles de IA podem gerar mídia
+quando o provedor, o modelo e a chave permitem. As chamadas em nuvem usam a cota do provedor.
 
-FFmpeg converts the selected recording to mono 24 kHz WAV. The microphone is released when
-recording stops or you leave the page. The recording is sent to your local Studio only after
-you select it. Uploading an existing audio file remains available.
-
-Use `localhost` or `127.0.0.1` for microphone permission. Use clean speech without music.
-
-## Prepare a reference and review a script
-
-**My references**, above the microphone in **Create audio**, lists recent recordings and references
-from this workspace. Select one to listen or reuse it. To keep a reference for routine use, give it
-a name and click **Save as favorite**. It also appears in **My voices**, with the transcript you entered.
-
-In **Create audio**, select a saved voice, record, or upload a reference. **Reference quality** checks
-duration, sample rate, recording level, and clipping, then suggests practical adjustments. Listen to
-the audio to check for background noise, echo, or overlapping speakers. Open **Listen to and trim
-the reference**, choose the start and end, and click **Use this clip** to select a separate WAV.
-**Transcribe reference** fills the editable transcript with local Whisper. The first transcription
-may download Whisper weights.
-
-Expand **Review script for F5-TTS** and choose Gemini, OpenAI, Claude, or local Ollama. The reviewer
-focuses on narration-friendly punctuation, pauses, and unambiguous pronunciations. **Suggest
-improvements** puts an editable suggestion below the script. **Use suggestion in script** copies it
-into the narration field. Enable **Suggest revisions before generating audio** to request a review
-when you click **Generate audio** with a new script.
-
-- **Cloud APIs.** Enter a key for the current page or configure `GEMINI_API_KEY`, `OPENAI_API_KEY`,
-  or `ANTHROPIC_API_KEY` in the Studio process environment. Requests send the script to the selected
-  provider. Reference audio and synthesis stay local. Studio's offline mode disables these APIs.
-- **Gemini media.** Open **AI consoles** to create videos with Gemini Omni Flash. Choose a duration
-  from 3 to 15 seconds and landscape or portrait framing. Choose **Background music** to generate a
-  track with Lyria 3 Clip or Lyria 3.5. Generated tracks are added to **Try background music** and
-  selected there for preview. These requests and any attached images are sent to Google and use the
-  Gemini API project's quota and billing.
-- **Local Ollama.** Install and start [Ollama](https://ollama.com/download) on the Studio machine and
-  download a model, for example with `ollama pull qwen2.5:3b`. Select **Local Ollama**, click **Find
-  local models**, then choose the installed model. Studio uses the loopback Ollama server at
-  `http://127.0.0.1:11434` by default. Set `OLLAMA_HOST` for a different loopback port. Local review
-  works in Studio's offline mode after the model is downloaded.
-
-For a second opinion on a short clip, enable **Gemini reference analysis** and click **Analyze and
-transcribe with Gemini**. This explicitly sends the selected audio to Google and returns an assessment,
-practical tips, and an editable transcript. Click **Use Gemini transcript** to copy it into the reference
-field. The local analysis and Whisper remain available. Use a Gemini key from the script panel or
-`GEMINI_API_KEY`.
-
-Use **What would you like to change or add?** to request changes such as a shorter opening or new
-dialogue. The result appears under **Suggested script**. Review it and click **Use suggestion in script**
-to replace the current text.
-
-To assign voices or deliveries within one output, enable **Choose a reference for each part**. Separate
-plain paragraphs with blank lines, or write speaker lines such as `Ana: Let's start.` and
-`Bruno: I'm ready.`. Click **Split script into parts**. Each part can use the main reference, a saved
-voice, or a recording or upload of its own. Reuse a reference across a character's lines, then override
-individual lines as needed. For a different emotion, choose a clean reference of the same speaker
-recorded with that delivery. F5-TTS uses the recording as a style cue. The Studio joins the parts in
-order and exports one file with the selected output settings.
-
-## Create a story with characters and different voices
-
-Open **Stories and characters**:
-
-1. Give the story a name.
-2. Build the cast. Each character has a name, a saved reference voice, and a model.
-3. Type or paste the script using `Character: dialogue`. You can start with a dialogue,
-   YouTube, or short-drama example.
-4. Click **Save story and assign dialogue**.
-5. Select a turn to change its text, character, position, or pause, or generate just that turn.
-6. Click **Generate complete story**, then download **WAV**, **SRT**, and **TXT**.
-
-Example with the English interface and the default cast:
-
-```text
-Narrator: It was a quiet morning until someone knocked at the door.
-
-Ana: Did you hear that noise too?
-
-Bruno: I did. Let's find out together.
-
-Narrator: And that is how the adventure began.
-```
-
-Use the exact names in your cast; names are matched without case sensitivity. Following lines
-continue the current character's turn. The first cast member narrates initial text without a speaker label.
-The initial narrator name and examples follow the interface language; your saved names are kept unchanged.
-Unknown speaker labels are reported before the project is saved.
-
-Assign distinct saved references to make characters sound different. Creating a character name does not
-invent a new voice. You can select your Portuguese fine-tune for one character and another registered
-model for another character.
-
-Existing, unchanged dialogue audio is reused. Editing one turn regenerates only that turn;
-reordering or renaming characters can reuse finished audio. Changing a character's voice or model
-requires its affected turns to be generated again. Pause duration is configurable per turn.
-You can stop after the current turn and continue later.
-
-The final WAV joins the turns and pauses. SRT subtitles include the character name and segment timings;
-TXT contains the editable character script. These files can be used in your video editor for YouTube
-or other storytelling projects. Video editing, background music, and lip synchronization are not part
-of this audio workflow.
-
-## Register and switch voice models
-
-In **My models**, name your model, select its `.pt`, `.pth`, `.ckpt`, or `.safetensors` checkpoint,
-and provide the training `vocab.txt`. Choose the architecture used for training: F5-TTS v1 Base,
-F5-TTS Base, F5-TTS Base · BigVGAN, or E2-TTS Base. Leave the vocabulary blank only if training
-retained the original vocabulary.
-
-You can upload the files or paste their paths. Windows paths such as `C:\Models\portuguese.pt`
-are supported under WSL. Uploaded models are stored in the workspace; pasted paths keep referring
-to the original files, which must stay accessible.
-
-Select a registered model in **Create audio**, **Revoice**, or each story character's model field.
-The original English/Chinese F5-TTS option stays available. Switching does not replace other checkpoints.
-
-The model library shows each registered checkpoint's size and whether it is used by a story or
-narration. Models in use are protected from removal. For an uploaded checkpoint managed by the
-Studio, choose **Remove** and confirm whether to delete the weights from disk. Files registered
-from outside the Studio can be removed from the library without deleting the original file.
-
-## Manage generated files
-
-Open **Files** to review generated WAV files, saved voice references, unused uploads, subtitles, and
-transcripts. Enter a destination path and choose whether to copy or move each file. A move updates
-the matching History, voice, narration, or transcript paths so the file remains available to the
-Studio. A copy leaves the source in place. Windows paths such as `C:\Users\YourName\Music\F5 Studio`
-are accepted when the Studio runs under WSL. Existing destination files are never overwritten.
-
-Deleting an audio file removes related History entries and invalidates narration audio that used
-it. A voice reference cannot be deleted while an existing story or narration uses that voice.
-
-## Train and compare voice checkpoints
-
-Open **Train a voice** to create or resume a project. Use an editable checkout for advanced
-training and BigVGAN so the project can use the base vocabulary and the NVIDIA submodule.
-A separate [Brazilian Portuguese guide](docs/guia-studio.md#treinamento-de-voz) covers the same workflow.
-
-1. **Data and transcripts.** Upload multiple recordings. Studio can transcribe and segment recordings
-   with Whisper, or read a pasted manifest with one `filename.wav|transcript` per short file.
-   Review each clip, check its RMS level and clipping, and approve it for training. Enable vocabulary
-   expansion to add tokens from approved transcripts while retaining the original token IDs.
-2. **Training and GPU.** Select the architecture and an optional compatible starting checkpoint and
-   vocabulary. The initial download for a public base checkpoint is around 1.4 GB. Use the suggested
-   GPU profile or configure BF16/FP16, frame budget, accumulation, clipping, workers, warmup,
-   8-bit Adam, activation recomputation (F5-TTS), TF32 (Ampere and newer), and checkpoint retention.
-   The optional validation percentage reserves approved clips before training. Each epoch reports
-   EMA loss on up to 24 of the reserved clips. Use different recordings and review their transcripts
-   before reserving a validation split.
-   Use **Multiple CUDA GPUs** to distribute training over all visible GPUs. Leave it off for one
-   GPU. Resume with the same number of GPUs. The optional **RAM spectrogram cache** reuses computed
-   features and divides the configured GiB budget across processes. Actual cache allocation is
-   capped by available host memory. The resource monitor charts CPU, RAM, disk occupancy and
-   throughput, GPU utilization, and VRAM. Training progress reports completed and planned updates.
-3. **Evaluate checkpoints.** Select checkpoints, a reference clip, and a fixed phrase to generate
-   comparable samples. Try phrases that cover the target language's sounds and writing system.
-4. **Use for inference.** Register a checkpoint and its training vocabulary in **My models**.
-5. **Quantization.** Export a checkpoint's linear layers as INT8 for CPU inference. You can also create
-   an INT8 copy from **My models**. The Studio reports both file sizes. To transfer a custom model,
-   download its INT8 weights and vocabulary from the library and register them on the other machine
-   with the same architecture. This format needs an x86 PyTorch quantized backend and preserves the
-   vocoder in its original precision.
-
-For a transcript manifest, enter one line per uploaded clip using its original filename.
-
-```text
-clip-01.wav|This is the first recording from the session.
-clip-02.wav|The second recording has a different intonation.
-```
-
-Use a fresh project to change base architecture, adjust the vocabulary after training, or fine-tune
-a prior checkpoint with different data. Resuming an existing run uses its saved optimizer and data
-order. The default model stays selectable alongside project checkpoints.
-
-For **F5-TTS Base · BigVGAN**, initialize the NVIDIA submodule once:
+Para usar BigVGAN, inicialize o submódulo a partir do clone editável:
 
 ```bash
 git submodule update --init -- src/third_party/BigVGAN
 ```
 
-This option uses the compatible SWivid acoustic checkpoint and NVIDIA BigVGAN v2 at 24 kHz with
-100 mel bands. The vocoder is downloaded on first synthesis or when generating training previews.
-Studio fine-tunes the acoustic model and uses BigVGAN's pretrained generator for waveform synthesis.
+[Guia completo do Studio](docs/guia-studio.md)
 
-## Subtitles, audio tools, and training
+## Workspace, atualização e diagnóstico
 
-- **Transcription:** local Whisper Small or Turbo, with editable text segments and TXT/SRT export.
-- **Subtitle translation:** local NLLB for Portuguese, English, Spanish, French, and German.
-  Review the translation; the original transcript is preserved.
-- **Revoice:** synthesize revised or translated text with a saved reference and a selected model.
-  This creates a new performance rather than preserving the original timing or delivery.
-- **Audio tools:** FFmpeg conversion, volume balancing, steady-noise reduction, and silence trimming.
-  The basic noise filter does not separate voice and music.
-- **Train a voice:** import recordings in the web interface, review and explicitly approve examples,
-  prepare data, start fine-tuning, and compare saved checkpoints. NVIDIA/CUDA is required by the guided
-  training presets; data preparation can run on CPU.
+Com o launcher, o workspace é `.studio/` e o cache do Hugging Face é
+`.cache/huggingface/`. O comando `f5-tts_studio` sem `--workspace` usa
+`~/.f5tts-studio/`. Mantenha a mesma pasta para reabrir suas montagens, modelos,
+biblioteca e histórico. Os takes ficam em `outputs/dubbing/<projeto>/takes/<fala>/`
+dentro do workspace. Os cortes e clipes das montagens são salvos no projeto.
+Faça backup também de `data/` e `ckpts/` se você treina modelos.
 
-Training examples must be 1–30 seconds; prefer 3–12 seconds. Three examples totaling 15 seconds
-are only a workflow minimum, not enough-data advice for a high-quality voice. Edits require preparation
-again. Ratings do not update weights: add a corrected recording and train again to teach a correction.
-
-## Workspaces and model downloads
-
-The default workspace is `~/.f5tts-studio`. Use `--workspace` to keep voices, models, stories,
-uploads, history, and preferences in another directory. Keep using the same path to retain access
-to your existing content. Training data and checkpoints in an editable checkout use `data/` and `ckpts/`.
-
-The optional `bash iniciar-studio.sh` launcher uses `.studio/` and `.cache/huggingface` inside this checkout.
-
-The first F5-TTS v1 Base + Vocos download is about **1.40 GB**, plus small configuration files.
-PyTorch/CUDA dependencies need additional space. Whisper and NLLB are separate downloads.
-Supplying the reference transcript avoids an ASR download solely for that reference.
-
-To work entirely offline, download all required weights first, then set:
+Para atualizar no Linux ou WSL2, pare o processo em execução e use a mesma venv e o mesmo
+workspace. Troque `cpu` pelo backend que instalou, caso use CUDA.
 
 ```bash
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 f5-tts_studio
+git pull --ff-only
+uv pip install --python .studio/interface-python315/bin/python --torch-backend=cpu -e ".[studio]"
+uv pip check --python .studio/interface-python315/bin/python
+bash iniciar-studio.sh
 ```
 
-PowerShell:
+No PowerShell, use o mesmo caminho `Scripts/python.exe` dos comandos de instalação.
 
-```powershell
-$env:HF_HUB_OFFLINE="1"
-$env:TRANSFORMERS_OFFLINE="1"
-.\.venv\Scripts\f5-tts_studio.exe
-```
-
-## Local security
-
-Studio accepts browser requests from its own loopback origin, with upload limits checked on the
-server. Gradio CLI access on a non-loopback interface or with a share link requires
-`F5_GRADIO_USERNAME` and `F5_GRADIO_PASSWORD`. The low-level socket server binds to loopback
-by default.
-
-Use PyTorch 2.10 or later, excluding the 2.14 series, for native PyTorch checkpoints. Use
-safetensors when exchanging model weights. Keep local workspaces and provider API keys private.
-The separate TensorRT deployment examples have their own runtime and dependency requirements.
-
-## Troubleshooting
-
-| Symptom | Check |
+| Sintoma | O que conferir |
 | --- | --- |
-| CUDA is unavailable | Confirm that `nvidia-smi` sees the GPU and that `torch.cuda.is_available()` returns `True` in the Studio environment. |
-| Too few batches for multi-GPU training | Try a smaller frame budget, more approved recordings, or a single GPU. |
-| GPU memory runs out | Reduce frames or examples per batch, then consider mixed precision, gradient accumulation, and F5-TTS activation recomputation. |
-| Host memory pressure | Lower the RAM cache limit or turn off the cache. With caching off, reduce data-loader workers if needed. |
-| Checkpoint and vocabulary do not match | Select the architecture and the vocabulary used by the checkpoint. Reprepare the approved dataset after changing the base vocabulary. |
-| BigVGAN is unavailable | Initialize the NVIDIA submodule from an editable checkout. |
-| An INT8 copy fails to load | Check for an x86 quantized PyTorch backend and use the original checkpoint architecture and vocabulary. |
-| Port 7862 is in use | Start with `f5-tts_studio --port 7870` and pass the workspace you want to open. |
+| O navegador não abre o Studio | Mantenha o processo rodando e confira a porta exibida no terminal. Se estiver ocupada, use `--port 7872`. |
+| O microfone não aparece | Abra pelo endereço `127.0.0.1` ou `localhost` e permita o uso do microfone no navegador. |
+| CUDA indisponível | Confira `nvidia-smi` e `torch.cuda.is_available()` dentro da venv usada pelo Studio. |
+| Falha ao carregar Chatterbox ou Demucs | Confira se a venv está dentro do workspace aberto e se os pesos do modelo estão disponíveis. |
+| Texto ou legenda não aparece no vídeo | Confira `ffmpeg -filters` e a disponibilidade de `drawtext`, `subtitles` e fontes com os caracteres usados. |
+| O Gemini não responde | Confira a chave, a cota, o modelo configurado e se o modo offline está desligado. |
 
-## Validation and development
+### Validação
 
-```bash
-python -m unittest discover -s tests -v
-```
+A instalação limpa em CPU no Linux/WSL2 foi verificada com Python 3.15.2 para Studio
+e Chatterbox, e Python 3.12.16 para Demucs. A verificação incluiu dependências,
+abertura das páginas de dublagem e edição, importação do Chatterbox, inicialização
+do CLI do Demucs e uma tradução local com NLLB.
 
-Version 1.3.6 validation included **61 automated tests**, browser checks for reference persistence,
-and a real CUDA synthesis with F5-TTS. Version 1.3.5 validation included **49 automated tests**, browser checks for batch import, review,
-training controls, live resource charts, and INT8 download. Synthetic training verified distributed
-execution with two CPU processes, gradient accumulation, validation, and checkpointing.
-BigVGAN inference produced 24 kHz WAV audio on an RTX 3080 Ti. INT8 CPU inference reduced the
-public F5-TTS v1 Base checkpoint from about **1.35 GB to 355 MB** in that test. The machine had
-one physical CUDA GPU, so the tests did not measure multi-GPU CUDA performance.
-The HTTP startup timeout is configurable through `F5_STUDIO_TEST_STARTUP_TIMEOUT` (default: 120 seconds).
-
-For the opt-in browser test with a temporary workspace and simulated synthesis:
+No ambiente do Studio, execute:
 
 ```bash
-python -m pip install playwright
-python -m playwright install --with-deps chromium --only-shell
-python testar-historias-navegador.py
+.studio/interface-python315/bin/python -m unittest discover -s tests -v
 ```
 
-It checks all seven interface languages, story creation with three voice references, dialogue editing,
-WAV/SRT/TXT downloads, and reopening the same story after changing the interface language.
+`testar-historias-navegador.py`, `testar-microfone-navegador.py` e
+`testar-modelo-real.py` têm verificações opcionais da interface e da síntese, com
+instruções nos próprios arquivos.
 
-`testar-microfone-navegador.py` checks the recorder against a separate test instance as described in its
-source. `testar-modelo-real.py` is an opt-in NVIDIA GPU synthesis check; it downloads about 1.40 GB if
-weights are missing and saves samples in the checkout's `.studio` workspace.
+## Projeto original e créditos
 
-The original-model GPU smoke test used Python 3.12.16, PyTorch 2.15.0+cu132, TorchAudio 2.11.1+cu132,
-and an RTX 3080 Ti under WSL2. It produced finite, non-silent 24 kHz English and Portuguese WAVs without
-PCM saturation. This does not establish Portuguese pronunciation quality or validate a private checkpoint.
-Complete fine-tuning and Whisper/NLLB quality with downloaded weights were not part of that check.
-
-Before committing:
-
-```bash
-python -m pip install pre-commit
-pre-commit run --all-files
-```
-
-## Upstream
-
-This Studio builds on **F5-TTS: A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching**
-and retains the upstream code license and acknowledgements below.
+O Studio usa **F5-TTS: A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching**.
 
 - [Upstream repository](https://github.com/SWivid/F5-TTS)
 - [Research paper](https://arxiv.org/abs/2410.06885)
@@ -430,7 +239,7 @@ and retains the upstream code license and acknowledgements below.
 - [Model repository](https://huggingface.co/SWivid/F5-TTS)
 
 
-## Acknowledgements
+### Agradecimentos
 
 - [E2-TTS](https://arxiv.org/abs/2406.18009) brilliant work, simple and effective
 - [Emilia](https://arxiv.org/abs/2407.05361), [WenetSpeech4TTS](https://arxiv.org/abs/2406.05763), [LibriTTS](https://arxiv.org/abs/1904.02882), [LJSpeech](https://keithito.com/LJ-Speech-Dataset/) valuable datasets
@@ -444,16 +253,15 @@ and retains the upstream code license and acknowledgements below.
 - [F5-TTS-ONNX](https://github.com/DakeQQ/F5-TTS-ONNX) ONNX Runtime version by [DakeQQ](https://github.com/DakeQQ)
 - [Yuekai Zhang](https://github.com/yuekaizhang) upstream runtime contributions ~
 
-## Citation
-If our work and codebase is useful for you, please cite as:
+### Citação
 ```
 @article{chen-etal-2024-f5tts,
-      title={F5-TTS: A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching}, 
+      title={F5-TTS: A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching},
       author={Yushen Chen and Zhikang Niu and Ziyang Ma and Keqi Deng and Chunhui Wang and Jian Zhao and Kai Yu and Xie Chen},
       journal={arXiv preprint arXiv:2410.06885},
       year={2024},
 }
 ```
-## License
+## Licença
 
-Our code is released under MIT License. The pre-trained models are licensed under the CC-BY-NC license due to the training data Emilia, which is an in-the-wild dataset. Sorry for any inconvenience this may cause.
+O código usa a [licença MIT](LICENSE). Os pesos pré-treinados do F5-TTS têm licença CC BY-NC. Consulte a licença de cada modelo adicional para o seu uso.

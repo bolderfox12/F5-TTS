@@ -732,6 +732,83 @@ class VideoDubbingTests(unittest.TestCase):
             self.assertTrue((pixels[65:115, 95:225, :] > 210).all(axis=2).any())
             self.assertAlmostEqual(video_duration(output), 2, delta=0.05)
 
+    def test_montage_transitions_blend_video_and_audio_in_an_overlap(self):
+        from f5_tts.studio.montage import MontageStore, render_montage
+        from f5_tts.studio.montage_transitions import overlap_start
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            studio = StudioService(root / "studio", root / "data")
+            store = MontageStore(studio)
+            red, blue = (studio.uploads / filename for filename in ("red.mp4", "blue.mp4"))
+            for source, color in ((red, "red"), (blue, "blue")):
+                subprocess.run(
+                    ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", f"color={color}:s=160x90:r=30:d=1", str(source)],
+                    check=True,
+                    capture_output=True,
+                )
+            first, second = store.clip(red, "Primeiro", 0), store.clip(blue, "Segundo", 1)
+            _, start, length = overlap_start([first, second], second, 0.4)
+            self.assertEqual(start, 0.6)
+            second.update(start=start, video_transition={"kind": "dissolve", "duration": length})
+            tones = []
+            for index, frequency in enumerate((400, 800)):
+                source = studio.uploads / f"tone-{index}.wav"
+                sf.write(source, np.sin(2 * np.pi * frequency * np.arange(48000) / 48000) * 0.12, 48000)
+                clip = store.clip(source, f"Áudio {index}", start if index else 0)
+                clip["audio_transition"] = {("fade_in" if index else "fade_out"): 0.4, "curve": "qsin"}
+                tones.append(clip)
+            project = {**store.create("Transições"), "clips": [first, second, *tones]}
+            video, _ = render_montage(studio, project, preview=True)
+            frame = subprocess.check_output(
+                [
+                    "ffmpeg",
+                    "-v",
+                    "error",
+                    "-ss",
+                    "0.8",
+                    "-i",
+                    str(video),
+                    "-vf",
+                    "scale=16:10",
+                    "-frames:v",
+                    "1",
+                    "-pix_fmt",
+                    "rgb24",
+                    "-f",
+                    "rawvideo",
+                    "-",
+                ]
+            )
+            red_value, _green, blue_value = np.frombuffer(frame, np.uint8).reshape(10, 16, 3)[5, 8]
+            self.assertTrue(75 < red_value < 180 and 75 < blue_value < 180, (red_value, blue_value))
+            raw = subprocess.check_output(
+                [
+                    "ffmpeg",
+                    "-v",
+                    "error",
+                    "-ss",
+                    "0.76",
+                    "-i",
+                    str(video),
+                    "-t",
+                    "0.08",
+                    "-vn",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    "48000",
+                    "-f",
+                    "f32le",
+                    "-",
+                ]
+            )
+            samples = np.frombuffer(raw, dtype="<f4")
+            frequencies = np.fft.rfftfreq(len(samples), 1 / 48000)
+            levels = np.abs(np.fft.rfft(samples))
+            low, high = (levels[np.argmin(np.abs(frequencies - hz))] for hz in (400, 800))
+            self.assertGreater(min(low, high) / max(low, high), 0.65)
+
     def test_editor_trims_and_joins_clips_with_music_and_styled_captions(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

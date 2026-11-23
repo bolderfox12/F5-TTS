@@ -42,7 +42,7 @@ export default {
                 style="position:absolute;top:5px;height:37px;min-width:14px;border-radius:7px;text-align:left;
                   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 8px;font-weight:650;font-size:11px;
                   cursor:grab;touch-action:none;color:#122b33">
-                <span v-if="clip.fx" style="margin-right:4px;border-radius:3px;background:#233f47;color:#fff;padding:2px 4px">{{ labels.fx }}</span>{{ clip.name }}
+                <span v-if="clip.fx" style="margin-right:4px;border-radius:3px;background:#233f47;color:#fff;padding:2px 4px">{{ labels.fx }}</span><span v-if="clip.transition" :title="labels.transitions" style="margin-right:4px">◩</span>{{ clip.name }}
               </button>
             </div>
             <div :style="{left:percent(position)}" aria-hidden="true" style="position:absolute;top:0;bottom:0;width:2px;
@@ -60,6 +60,8 @@ export default {
             style="padding:8px 12px;width:100%;text-align:left">{{ labels.audioEffects }}</button>
           <button v-if="menu.hasVideo" type="button" role="menuitem" @click="videoEffectsMenu"
             style="padding:8px 12px;width:100%;text-align:left">{{ labels.videoEffects }}</button>
+          <button v-if="menu.canTransition" type="button" role="menuitem" @click="transitionsMenu"
+            style="padding:8px 12px;width:100%;text-align:left">{{ labels.transitions }}</button>
         </div>
       </teleport>
     </section>`,
@@ -111,15 +113,16 @@ export default {
       this.menu=null;
       this.$emit("split",{id:this.selected,position:Number(this.position.toFixed(3))});
     },
-    openMenu(payload,event,hasAudio=false,hasVideo=false){
-      this.menu={payload,hasAudio,hasVideo,x:Math.max(4,Math.min(event.clientX,window.innerWidth-170)),
-        y:Math.max(4,Math.min(event.clientY,window.innerHeight-(hasAudio||hasVideo?110:54)))};
+    openMenu(payload,event,hasAudio=false,hasVideo=false,canTransition=false){
+      this.menu={payload,hasAudio,hasVideo,canTransition,x:Math.max(4,Math.min(event.clientX,window.innerWidth-170)),
+        y:Math.max(4,Math.min(event.clientY,window.innerHeight-(canTransition?165:54)))};
     },
-    clipMenu(clip,event){this.$emit("select-clip",clip.id);this.openMenu({id:clip.id},event,clip.has_audio,clip.track==="V1");},
+    clipMenu(clip,event){this.$emit("select-clip",clip.id);this.openMenu({id:clip.id},event,clip.has_audio,clip.track==="V1",clip.has_audio||clip.kind==="video");},
     trackMenu(track,event){if(["V1","V2"].includes(track)||/^A[1-9][0-9]*$/.test(track))this.openMenu({track},event);},
     duplicateMenu(){if(this.menu)this.$emit("duplicate",this.menu.payload);this.menu=null;},
     audioEffectsMenu(){if(this.menu?.hasAudio)this.$emit("audio-effects",this.menu.payload.id);this.menu=null;},
     videoEffectsMenu(){if(this.menu?.hasVideo)this.$emit("video-effects",this.menu.payload.id);this.menu=null;},
+    transitionsMenu(){if(this.menu?.canTransition)this.$emit("transitions",this.menu.payload.id);this.menu=null;},
     dismissMenu(event){if(!event.target?.closest?.("[role=menu]"))this.menu=null;},
     clipStyle(clip){
       const start=this.drag?.id===clip.id?this.drag.position:clip.start;

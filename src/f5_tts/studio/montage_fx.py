@@ -19,7 +19,7 @@ FX_CONTROLS = {
     },
     "gradient": {"amount": ("Intensidade do mapa (%)", 0, 100, 100)},
     "pinch": {
-        "amount": ("Pinch ↔ Punch", -100, 100, 0),
+        "amount": ("Contração ↔ expansão (%)", -100, 100, 0),
         "radius": ("Raio do efeito (%)", 10, 100, 60),
         "x": ("Centro horizontal (%)", 0, 100, 50),
         "y": ("Centro vertical (%)", 0, 100, 50),
@@ -32,11 +32,11 @@ FX_CONTROLS = {
     },
 }
 FX_TITLES = {
-    "hsl": "HSL Adjust",
-    "lab": "Lab Adjust · Invert Luminosity",
-    "gradient": "Gradient Map",
-    "pinch": "Pinch and Punch",
-    "swirl": "Swirl",
+    "hsl": "Ajuste HSL",
+    "lab": "Ajuste Lab e inversão de luminosidade",
+    "gradient": "Mapa de gradiente",
+    "pinch": "Contração e expansão",
+    "swirl": "Redemoinho",
 }
 GRADIENT_COLORS = {"shadows": "#20243F", "highlights": "#F9DCA0"}
 RGB_TO_XYZ = np.array(

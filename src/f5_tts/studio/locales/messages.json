@@ -6664,5 +6664,220 @@
   [
     "Aplicar e gerar prévia",
     "Apply and generate preview"
-  ]
+  ],
+  [
+    "Ajuste HSL",
+    "HSL Adjust"
+  ],
+  [
+    "Ajuste Lab e inversão de luminosidade",
+    "Lab Adjust and Invert Lightness"
+  ],
+  [
+    "Mapa de gradiente",
+    "Gradient Map"
+  ],
+  [
+    "Contração e expansão",
+    "Pinch and Punch"
+  ],
+  [
+    "Redemoinho",
+    "Swirl"
+  ],
+  [
+    "Contração ↔ expansão (%)",
+    "Pinch ↔ punch (%)"
+  ],
+  [
+    "Efeitos de áudio",
+    "Audio effects"
+  ],
+  [
+    "Efeitos",
+    "Effects"
+  ],
+  [
+    "Altura do som (semitons)",
+    "Pitch (semitones)"
+  ],
+  [
+    "Selecione um clipe com áudio.",
+    "Select a clip with audio."
+  ],
+  [
+    "Transições",
+    "Transitions"
+  ],
+  [
+    "Transição de vídeo",
+    "Video transition"
+  ],
+  [
+    "Duração da transição (s)",
+    "Transition duration (s)"
+  ],
+  [
+    "Sobrepor ao clipe anterior na mesma faixa",
+    "Overlap the previous clip on the same track"
+  ],
+  [
+    "Entrada gradual (s)",
+    "Fade in (s)"
+  ],
+  [
+    "Saída gradual (s)",
+    "Fade out (s)"
+  ],
+  [
+    "Curva do volume",
+    "Volume curve"
+  ],
+  [
+    "Mesclar com o áudio anterior na mesma faixa",
+    "Crossfade with the previous audio clip on the same track"
+  ],
+  [
+    "Duração da mescla (s)",
+    "Crossfade duration (s)"
+  ],
+  [
+    "Selecione um clipe de vídeo ou áudio para ajustar a transição.",
+    "Select a video or audio clip to adjust its transition."
+  ],
+  [
+    "Sem transição",
+    "No transition"
+  ],
+  [
+    "Dissolução",
+    "Dissolve"
+  ],
+  [
+    "Entrada a partir do preto",
+    "Fade in from black"
+  ],
+  [
+    "Deslizar da direita",
+    "Slide from right"
+  ],
+  [
+    "Linear",
+    "Linear"
+  ],
+  [
+    "Potência constante",
+    "Constant power"
+  ],
+  [
+    "Escolha uma transição de vídeo válida.",
+    "Choose a valid video transition."
+  ],
+  [
+    "Escolha uma curva de áudio válida.",
+    "Choose a valid audio curve."
+  ],
+  [
+    "A duração da transição deve ficar entre 0 e 10 segundos.",
+    "The transition duration must be between 0 and 10 seconds."
+  ],
+  [
+    "Adicione outro clipe antes deste na mesma faixa para criar a transição.",
+    "Add another clip before this one on the same track to create a transition."
+  ],
+  [
+    "Os clipes são curtos demais para essa transição.",
+    "The clips are too short for this transition."
+  ],
+  ["Salvar perfil", "Save profile"],
+  ["Configurar chave da YouTube Data API", "Configure YouTube Data API key"],
+  ["Criar pauta", "Create topic"],
+  ["Perfil do canal salvo.", "Channel profile saved."],
+  ["Estúdio YouTube", "YouTube Studio"],
+  ["Configure seu canal e reúna pautas com fontes identificadas.", "Set up your channel and collect topics with identified sources."],
+  ["1 · Organizar posts", "1 · Organize posts"],
+  ["Salve o perfil do canal antes de pesquisar.", "Save the channel profile before researching."],
+  ["Gerar roteiro com IA", "Generate script with AI"],
+  ["Salvar roteiro e montar timeline", "Save script and build timeline"],
+  ["Informe o nome do canal.", "Enter the channel name."],
+  ["Salve o perfil do canal antes de criar pautas.", "Save the channel profile before creating topics."],
+  ["Pauta adicionada à caixa de entrada.", "Topic added to the inbox."],
+  ["Salve o perfil do canal antes de buscar pautas.", "Save the channel profile before searching for topics."],
+  ["Busca concluída na YouTube Data API.", "YouTube Data API search completed."],
+  ["Salve o perfil do canal antes de importar referências.", "Save the channel profile before importing references."],
+  ["Referência importada. Use Roteiro e cenas para criar uma abordagem própria para seu canal.", "Reference imported. Use Script and scenes to create an original approach for your channel."],
+  ["Perfil do canal", "Channel profile"],
+  ["Nome do canal", "Channel name"],
+  ["Nicho", "Niche"],
+  ["Subnichos", "Sub-niches"],
+  ["Público", "Audience"],
+  ["Palavras monitoradas, separadas por vírgula", "Monitored keywords, separated by commas"],
+  ["Identificador do modelo", "Model ID"],
+  ["Radar de pautas", "Topic radar"],
+  ["Buscar agora", "Search now"],
+  ["Importar referência", "Import reference"],
+  ["Pesquisa de comunidades e audiência", "Community and audience research"],
+  ["Cole posts e contagens coletados por você em uma comunidade. A IA organiza os dados, resume padrões e sugere pautas.", "Paste posts and counts you collected from a community. AI organizes the data, summarizes patterns, and suggests topics."],
+  ["Comunidade ou origem", "Community or source"],
+  ["Região", "Region"],
+  ["Idioma", "Language"],
+  ["Modelo para o roteiro", "Script model"],
+  ["2 · Analisar dores e desejos", "2 · Analyze pains and desires"],
+  ["3 · Sugerir títulos", "3 · Suggest titles"],
+  ["Revise as afirmações e as instruções visuais. Fontes e fatos seguem associados à pauta.", "Review claims and visual directions. Sources and facts remain linked to the topic."],
+  ["Chave da YouTube Data API", "YouTube Data API key"],
+  ["Chave salva localmente.", "Key saved locally."],
+  ["Buscar no YouTube", "Search YouTube"],
+  ["Analisar vídeo de referência do YouTube", "Analyze a YouTube reference video"],
+  ["Adicionar pauta manualmente", "Add a topic manually"],
+  ["Contexto, fatos e pendências", "Context, facts, and open questions"],
+  ["Posts copiados da comunidade", "Posts copied from the community"],
+  ["Posts organizados", "Organized posts"],
+  ["Dores", "Pain points"],
+  ["Desejos", "Desires"],
+  ["Necessidades práticas", "Practical needs"],
+  ["Narração por cena", "Narration by scene"],
+  ["Gere um trecho por vez com o F5-TTS ou Chatterbox, revise a voz e abra a timeline editável.", "Generate one segment at a time with F5-TTS or Chatterbox, review the voice, and open the editable timeline."],
+  ["Número da cena", "Scene number"],
+  ["Salve uma referência de voz e selecione-a.", "Save a voice reference and select it."],
+  ["Cena narrada e sincronizada na timeline.", "Scene narrated and synchronized on the timeline."],
+  ["Gerar narração desta cena", "Generate narration for this scene"],
+  ["Revise o JSON do roteiro e suas cenas.", "Review the script JSON and its scenes."],
+  ["Cole títulos, comentários e votos da sua planilha ou pesquisa manual.", "Paste titles, comments, and votes from your spreadsheet or manual research."],
+  ["Roteiro editável em JSON", "Editable script in JSON"],
+  ["Roteiro e cenas", "Script and scenes"],
+  ["Referência de voz do Studio", "Studio voice reference"],
+  ["Modelo de síntese", "Synthesis model"],
+  ["Gravar comando", "Record command"],
+  ["Transcrever comando", "Transcribe command"],
+  ["Fale por até 30 segundos e revise o texto antes de enviar.", "Speak for up to 30 seconds and review the text before sending."],
+  ["Transcrevendo comando…", "Transcribing command…"],
+  ["Comando transcrito.", "Command transcribed."],
+  ["Abra um projeto de vídeo para usar o console.", "Open a video project to use the console."],
+  ["O projeto mudou. Gere um novo plano de edição.", "The project changed. Generate a new edit plan."],
+  ["Console de IA", "AI console"],
+  ["Ritmo da fala (F5-TTS)", "Speech pace (F5-TTS)"],
+  ["Transcrevendo a narração gerada localmente…", "Transcribing the generated narration locally…"],
+  ["Natural e conversacional", "Natural and conversational"],
+  ["Documentário calmo", "Calm documentary"],
+  ["Educativo envolvente", "Engaging educational"],
+  ["Energético e direto", "Energetic and direct"],
+  ["Narrativa dramática contida", "Restrained dramatic narration"],
+  ["Intenção da narração", "Narration style"],
+  ["Conferir pronúncia e texto com Whisper", "Check pronunciation and text with Whisper"],
+  ["Gere um áudio para conferir o que foi pronunciado.", "Generate audio to check what was spoken."],
+  ["Transcrever e comparar", "Transcribe and compare"],
+  ["Transcrição do áudio gerado", "Generated audio transcript"],
+  ["A transcrição coincide com o roteiro. Confira também a pronúncia ouvindo o áudio.", "The transcript matches the script. Also listen to check pronunciation."],
+  ["Há diferenças entre o roteiro e a fala reconhecida. Revise o trecho ouvindo o áudio.", "The script differs from the recognized speech. Review the segment while listening."],
+  ["Sugerir alterações", "Suggest edits"],
+  ["Informe um comando de até 4.000 caracteres.", "Enter a command of up to 4,000 characters."],
+  ["Selecione um modelo de IA.", "Select an AI model."],
+  ["Use os nomes dos clipes, a seleção ou os tempos da timeline. Revise o plano antes de aplicar.", "Use clip names, the selection, or timeline times. Review the plan before applying it."],
+  ["Nenhuma alteração foi sugerida.", "No edits were suggested."],
+  ["Modelo Gemini", "Gemini model"],
+  ["Provedor", "Provider"],
+  ["Modelo no Ollama", "Ollama model"],
+  ["O que você quer alterar?", "What would you like to change?"],
+  ["Texto para publicação no YouTube", "YouTube publication text"]
 ]

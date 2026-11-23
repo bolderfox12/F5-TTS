@@ -24,8 +24,10 @@ from f5_tts.studio.montage import (
     split_at,
     validate_clip,
 )
+from f5_tts.studio.montage_assistant_panel import assistant_dialog
 from f5_tts.studio.montage_fx import FX_CONTROLS, FX_TITLES, GRADIENT_COLORS
 from f5_tts.studio.montage_timeline import MontageTimeline
+from f5_tts.studio.montage_transitions import AUDIO_CURVES, VIDEO_TRANSITIONS, overlap_start
 from f5_tts.studio.video_dubbing import VIDEO_EXTENSIONS, VIDEO_LIMIT
 from f5_tts.studio.video_editor import MUSIC_EXTENSIONS
 
@@ -332,13 +334,16 @@ def register_montage_page(service, shell, action):
             finally:
                 busy = False
 
-        async def replace_clip(clip, **values):
+        async def replace_clip(clip, *, related=None, **values):
             nonlocal busy
             if busy or not current:
                 return
             timing = {key: value for key, value in values.items() if key in {"start", "in", "out"}}
             members = linked_clips(current["clips"], clip)
             edits = {row["id"]: {**row, **(values if row["id"] == clip["id"] else timing)} for row in members}
+            for row in current["clips"]:
+                if related and row["id"] in related:
+                    edits[row["id"]] = {**edits.get(row["id"], row), **related[row["id"]]}
             try:
                 for edited in edits.values():
                     validate_clip(edited)
@@ -436,16 +441,16 @@ def register_montage_page(service, shell, action):
             finally:
                 busy = False
 
-        def edit_audio_effects(event):
+        def open_audio_effects(identifier):
             if not current or busy:
                 return
-            clip = next((row for row in current["clips"] if row["id"] == event.args and row["has_audio"]), None)
+            clip = next((row for row in current["clips"] if row["id"] == identifier and row["has_audio"]), None)
             if not clip:
-                return
+                return ui.notify(t("Selecione um clipe com áudio."), type="warning")
             with ui.dialog() as dialog, ui.card().classes("studio-card w-full max-w-md gap-4"):
-                ui.label(t("Pitch e equalizador")).classes("text-lg font-semibold")
+                ui.label(t("Efeitos de áudio")).classes("text-lg font-semibold")
                 ui.label(clip["name"]).classes("studio-muted")
-                ui.label(t("Pitch (semitons)"))
+                ui.label(t("Altura do som (semitons)"))
                 pitch = (
                     ui.slider(
                         min=-PITCH_LIMIT,
@@ -471,10 +476,11 @@ def register_montage_page(service, shell, action):
                     )
 
                 async def apply():
-                    await replace_clip(
+                    if await replace_clip(
                         clip, pitch=pitch.value, equalizer={band: slider.value for band, slider in gain.items()}
-                    )
-                    dialog.close()
+                    ):
+                        dialog.close()
+                        await render(True, seek=clip["start"])
 
                 def reset():
                     pitch.set_value(0)
@@ -482,7 +488,7 @@ def register_montage_page(service, shell, action):
                         slider.set_value(0)
 
                 with ui.row():
-                    ui.button(t("Aplicar ao clipe"), icon="check", on_click=apply)
+                    ui.button(t("Aplicar e gerar prévia"), icon="check", on_click=apply)
                     ui.button(t("Restaurar padrão"), icon="undo", on_click=reset).props("flat")
             dialog.open()
 
@@ -509,7 +515,7 @@ def register_montage_page(service, shell, action):
                         ui.label(clip["name"]).classes("studio-muted")
                     ui.icon("auto_fix_high", size="28px", color="primary")
                 with ui.tabs().classes("w-full").props("inline-label outside-arrows mobile-arrows") as effects_tabs:
-                    tabs = {key: ui.tab(key, label=title) for key, title in FX_TITLES.items()}
+                    tabs = {key: ui.tab(key, label=t(title)) for key, title in FX_TITLES.items()}
                 with ui.tab_panels(effects_tabs, value=tabs["hsl"]).classes("w-full"):
                     for effect, parameters in FX_CONTROLS.items():
                         saved = values.get(effect, {})
@@ -605,6 +611,109 @@ def register_montage_page(service, shell, action):
                     ui.button(t("Fechar"), on_click=dialog.close).props("flat")
             dialog.open()
 
+        def open_transitions(identifier):
+            if not current or busy:
+                return
+            clip = next((row for row in current["clips"] if row["id"] == identifier), None)
+            if not clip or (clip["kind"] != "video" and not clip["has_audio"]):
+                return ui.notify(t("Selecione um clipe de vídeo ou áudio para ajustar a transição."), type="warning")
+            has_video, has_audio = clip["kind"] == "video", clip["has_audio"]
+            with ui.dialog() as dialog, ui.card().classes("studio-card w-full max-w-lg gap-4"):
+                ui.label(t("Transições")).classes("text-xl font-semibold")
+                ui.label(clip["name"]).classes("studio-muted")
+                if has_video:
+                    saved = clip.get("video_transition", {})
+                    video_kind = (
+                        ui.select(
+                            {key: t(label) for key, label in VIDEO_TRANSITIONS.items()},
+                            value=saved.get("kind", "none"),
+                            label=t("Transição de vídeo"),
+                        )
+                        .props("outlined dense")
+                        .classes("w-full")
+                    )
+                    length = ui.number(
+                        t("Duração da transição (s)"),
+                        value=saved.get("duration", 0.5),
+                        min=0.05,
+                        max=10,
+                        step=0.05,
+                    ).props("outlined dense")
+                    overlap = ui.checkbox(t("Sobrepor ao clipe anterior na mesma faixa"))
+                if has_audio:
+                    saved = clip.get("audio_transition", {})
+                    with ui.row().classes("w-full"):
+                        fade_in = ui.number(
+                            t("Entrada gradual (s)"),
+                            value=saved.get("fade_in", 0),
+                            min=0,
+                            max=10,
+                            step=0.05,
+                        ).props("outlined dense")
+                        fade_out = ui.number(
+                            t("Saída gradual (s)"),
+                            value=saved.get("fade_out", 0),
+                            min=0,
+                            max=10,
+                            step=0.05,
+                        ).props("outlined dense")
+                    curve = ui.select(
+                        {key: t(label) for key, label in AUDIO_CURVES.items()},
+                        value=saved.get("curve", "tri"),
+                        label=t("Curva do volume"),
+                    ).props("outlined dense")
+                    blend = ui.checkbox(t("Mesclar com o áudio anterior na mesma faixa"))
+                    blend_duration = (
+                        ui.number(
+                            t("Duração da mescla (s)"),
+                            value=0.5,
+                            min=0.05,
+                            max=10,
+                            step=0.05,
+                        )
+                        .props("outlined dense")
+                        .bind_visibility_from(blend, "value")
+                    )
+
+                async def apply():
+                    values = {}
+                    related = {}
+                    try:
+                        if has_video:
+                            seconds = length.value or 0
+                            values["video_transition"] = {"kind": video_kind.value, "duration": seconds}
+                            if overlap.value and video_kind.value != "none":
+                                _, start, actual = overlap_start(current["clips"], clip, seconds)
+                                values["start"] = start
+                                values["video_transition"]["duration"] = actual
+                        if has_audio:
+                            values["audio_transition"] = {
+                                "fade_in": fade_in.value or 0,
+                                "fade_out": fade_out.value or 0,
+                                "curve": curve.value,
+                            }
+                            if blend.value:
+                                previous, start, actual = overlap_start(
+                                    current["clips"], clip, blend_duration.value or 0
+                                )
+                                values["start"] = start
+                                values["audio_transition"]["fade_in"] = actual
+                                related[previous["id"]] = {
+                                    "audio_transition": {
+                                        **previous.get("audio_transition", {}),
+                                        "fade_out": actual,
+                                        "curve": curve.value,
+                                    }
+                                }
+                    except ValueError as error:
+                        return ui.notify(t(str(error)), type="warning")
+                    if await replace_clip(clip, related=related, **values):
+                        dialog.close()
+                        await render(True, seek=values.get("start", clip["start"]))
+
+                ui.button(t("Aplicar e gerar prévia"), icon="check", on_click=apply)
+            dialog.open()
+
         async def render(preview, *, seek=None):
             nonlocal busy
             if busy:
@@ -624,6 +733,28 @@ def register_montage_page(service, shell, action):
             finally:
                 busy = False
                 bar.set_visibility(False)
+
+        def open_assistant():
+            async def commit(original, candidate, selection, cursor):
+                nonlocal busy
+                if busy or current != original:
+                    ui.notify(t("O projeto mudou. Gere um novo plano de edição."), type="warning")
+                    return False
+                busy = True
+                try:
+                    clip_ids = {row["id"] for row in candidate["clips"]}
+                    saved = await persist(candidate, selection if selection in clip_ids else None)
+                    if saved:
+                        profile.set_value(saved["profile"])
+                finally:
+                    busy = False
+                if saved and saved["clips"]:
+                    await render(True, seek=min(cursor, sequence_duration(saved["clips"])))
+                return bool(saved)
+
+            if not current:
+                return ui.notify(t("Abra um projeto de vídeo para usar o console."), type="warning")
+            assistant_dialog(service, action, lambda: (current, selected, playhead), commit)
 
         @ui.refreshable
         def inspector():
@@ -647,14 +778,16 @@ def register_montage_page(service, shell, action):
             gain = ui.number(t("Volume (%)"), value=clip["volume"], min=0, max=200).props("outlined dense")
             gain.set_visibility(clip["has_audio"])
             pitch = ui.number(
-                t("Pitch (semitons)"),
+                t("Altura do som (semitons)"),
                 value=clip.get("pitch", 0),
                 min=-PITCH_LIMIT,
                 max=PITCH_LIMIT,
                 step=0.5,
             ).props("outlined dense")
             pitch.set_visibility(clip["has_audio"])
-            text_panel = None
+            text_panel = font_size = None
+            if clip["kind"] == "caption" and "text" in clip:
+                text_panel = ui.textarea(t("Texto da legenda"), value=clip["text"]).props("outlined").classes("w-full")
             if clip["kind"] == "text":
                 text_panel = ui.textarea(t("Texto na tela"), value=clip["text"]).props("outlined").classes("w-full")
                 font_size = ui.number(t("Tamanho da fonte"), value=clip.get("font_size", 48), min=12, max=150).props(
@@ -670,11 +803,8 @@ def register_montage_page(service, shell, action):
                     **{"in": first.value, "out": last.value},
                     volume=gain.value if gain.value is not None else 100,
                     pitch=pitch.value if pitch.value is not None else 0,
-                    **(
-                        {"text": (text_panel.value or "").strip(), "font_size": font_size.value or 48}
-                        if text_panel
-                        else {}
-                    ),
+                    **({"text": (text_panel.value or "").strip()} if text_panel else {}),
+                    **({"font_size": font_size.value or 48} if font_size else {}),
                 )
 
             async def split():
@@ -719,7 +849,16 @@ def register_montage_page(service, shell, action):
                     ui.button(t("Abrir projeto"), icon="folder_open", on_click=open_project).props("flat")
                     name = ui.input(t("Nome do projeto")).props("outlined dense")
                     profile = ui.select(
-                        {"720p": "HD · 16:9", "1080p": "Full HD · 16:9", "vertical": t("Vertical · 9:16")},
+                        {
+                            "480p": "480p · 16:9",
+                            "720p": "HD · 16:9",
+                            "1080p": "Full HD · 16:9",
+                            "4k": "4K · 16:9",
+                            "vertical": t("Vertical · 9:16"),
+                            "square": "Quadrado · 1:1",
+                            "portrait": "Retrato · 4:5",
+                            "cinema": "Cinema · 21:9",
+                        },
                         value="720p",
                         label=t("Formato da montagem"),
                     ).props("outlined dense")
@@ -780,6 +919,15 @@ def register_montage_page(service, shell, action):
                     result = ui.row().classes("w-full")
             with ui.row().classes("w-full"):
                 ui.button(t("Adicionar faixa de áudio"), icon="playlist_add", on_click=add_audio_track).props("outline")
+                ui.button(t("Console de IA"), icon="auto_awesome", on_click=open_assistant).props("outline")
+                ui.button(t("Transições"), icon="animation", on_click=lambda: open_transitions(selected)).props(
+                    "outline"
+                )
+                ui.button(
+                    t("Efeitos de áudio"),
+                    icon="graphic_eq",
+                    on_click=lambda: open_audio_effects(selected),
+                ).props("outline")
                 ui.button(
                     t("Efeitos de vídeo"),
                     icon="auto_fix_high",
@@ -793,8 +941,9 @@ def register_montage_page(service, shell, action):
                 position,
                 key_split,
                 context_duplicate,
-                edit_audio_effects,
+                lambda event: open_audio_effects(event.args),
                 lambda event: open_video_effects(event.args),
+                lambda event: open_transitions(event.args),
             ).classes("w-full")
             with ui.card().classes("studio-card w-full"):
                 inspector()

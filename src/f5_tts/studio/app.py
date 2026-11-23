@@ -26,6 +26,7 @@ from f5_tts.studio.service import StudioService
 from f5_tts.studio.story_pages import register_story_pages
 from f5_tts.studio.training_pages import register_training_pages
 from f5_tts.studio.video_dubbing_page import register_video_dubbing_page
+from f5_tts.studio.youtube_studio import register_youtube_studio
 
 
 CSS = """
@@ -100,7 +101,13 @@ def register_pages(service):
                         ("Dublagem convencional com humanos", "mic", "/video-dubbing-human"),
                     ],
                 ),
-                ("EDIÇÃO", [("Editor de vídeo avançado", "video_library", EDITOR_PATH)]),
+                (
+                    "EDIÇÃO",
+                    [
+                        ("Editor de vídeo avançado", "video_library", EDITOR_PATH),
+                        ("Estúdio YouTube", "smart_display", "/youtube-studio"),
+                    ],
+                ),
                 (
                     "PROJETOS",
                     [
@@ -205,6 +212,7 @@ def register_pages(service):
     register_local_pages(service, shell, action, audio_upload)
     register_video_dubbing_page(service, shell, action)
     register_montage_page(service, shell, action)
+    register_youtube_studio(service, shell, action)
     register_model_pages(service, shell, action)
     register_story_pages(service, shell, action)
     register_training_pages(service, shell, action, audio_upload)
@@ -504,6 +512,17 @@ def register_pages(service):
                     saved_model.on_value_change(
                         lambda event: chatterbox_language.set_visibility(event.value == chatterbox.MODEL_ID)
                     )
+                    speech_speed = ui.number(
+                        t("Ritmo da fala (F5-TTS)"),
+                        value=service.read()["settings"].get("speed", 1.0),
+                        min=0.5,
+                        max=2,
+                        step=0.05,
+                    ).props("outlined")
+                    speech_speed.set_visibility(saved_model.value != chatterbox.MODEL_ID)
+                    saved_model.on_value_change(
+                        lambda event: speech_speed.set_visibility(event.value != chatterbox.MODEL_ID)
+                    )
                     ui.link(t("Cadastrar meu modelo em português ou outro checkpoint"), "/models").classes("text-sm")
                     with ui.expansion(t("Usar um modelo que eu treinei"), icon="school").classes("w-full"):
                         trained_project = ui.select(
@@ -633,6 +652,17 @@ def register_pages(service):
                             .props("outlined rows=3")
                             .classes("w-full")
                         )
+                        delivery_style = ui.select(
+                            {
+                                "natural": t("Natural e conversacional"),
+                                "documentary": t("Documentário calmo"),
+                                "educational": t("Educativo envolvente"),
+                                "energetic": t("Energético e direto"),
+                                "story": t("Narrativa dramática contida"),
+                            },
+                            value="natural",
+                            label=t("Intenção da narração"),
+                        ).props("outlined")
                         automatic_review = ui.switch(t("Sugerir revisão antes de gerar áudio"), value=False)
                         review_status = ui.label("").classes("text-sm studio-muted")
 
@@ -644,6 +674,7 @@ def register_pages(service):
                                 provider.value,
                                 (model or "").strip(),
                                 (extra_instructions.value or "").strip(),
+                                delivery_style.value,
                             )
 
                         def switch_provider():
@@ -669,7 +700,15 @@ def register_pages(service):
                             if review_state["busy"]:
                                 return False
                             identity = review_identity()
-                            source, selected_provider, model, instructions = identity
+                            source, selected_provider, model, instructions, style = identity
+                            style_instructions = {
+                                "natural": "Use uma entrega natural e conversacional, com frases fáceis de pronunciar e pausas sugeridas pela pontuação.",
+                                "documentary": "Use uma entrega calma de documentário, com pausas claras e frases equilibradas, sem dramatização exagerada.",
+                                "educational": "Use uma entrega educativa envolvente, articulando termos importantes e variando o ritmo para facilitar a compreensão.",
+                                "energetic": "Use uma entrega energética e direta, com frases curtas e ênfase textual moderada, sem alterar fatos.",
+                                "story": "Use uma entrega narrativa expressiva e contida, com pausas naturais e sem acrescentar acontecimentos ou instruções ao texto falado.",
+                            }[style]
+                            instructions = "\n".join(filter(None, (style_instructions, instructions)))
                             review_state["busy"] = True
                             review_state["pending"] = None
                             suggestion.set_visibility(False)
@@ -849,6 +888,7 @@ def register_pages(service):
                                     voice.value,
                                     *settings,
                                     language=chatterbox_language.value,
+                                    speech_speed=speech_speed.value,
                                     cancel_event=cancel_event,
                                 )
                             if result:
@@ -858,6 +898,7 @@ def register_pages(service):
                                 await preview_narration(result["path"])
                                 download.enable()
                                 send_audio.enable()
+                                verify_button.enable()
                                 status.set_text(
                                     t(
                                         "Áudio {value_0} pronto. Você também pode encontrá-lo no Histórico.",
@@ -895,6 +936,47 @@ def register_pages(service):
                     with ui.card().classes("studio-card w-full"):
                         ui.label(t("04 / Resultado")).classes("font-semibold text-lg")
                         player = AudioTimeline(t).classes("w-full")
+                        with ui.expansion(t("Conferir pronúncia e texto com Whisper"), icon="fact_check").classes(
+                            "w-full"
+                        ):
+                            verification_status = ui.label(
+                                t("Gere um áudio para conferir o que foi pronunciado.")
+                            ).classes("studio-muted")
+                            verification = (
+                                ui.textarea(t("Transcrição do áudio gerado")).props("outlined rows=3").classes("w-full")
+                            )
+
+                            async def verify_generated_audio():
+                                if not generated.get("path"):
+                                    return
+                                verify_button.disable()
+                                verification_status.set_text(t("Transcrevendo a narração gerada localmente…"))
+                                try:
+                                    transcript = await action(service.transcribe_reference, generated["path"])
+                                    if transcript is not None:
+                                        verification.set_value(transcript)
+                                        def normalize(value):
+                                            return " ".join(value.casefold().split()).strip(" .,!?;:")
+
+                                        if normalize(transcript) == normalize(generated.get("text", "")):
+                                            verification_status.set_text(
+                                                t(
+                                                    "A transcrição coincide com o roteiro. Confira também a pronúncia ouvindo o áudio."
+                                                )
+                                            )
+                                        else:
+                                            verification_status.set_text(
+                                                t(
+                                                    "Há diferenças entre o roteiro e a fala reconhecida. Revise o trecho ouvindo o áudio."
+                                                )
+                                            )
+                                finally:
+                                    verify_button.enable()
+
+                            verify_button = ui.button(
+                                t("Transcrever e comparar"), icon="spellcheck", on_click=verify_generated_audio
+                            ).props("outline")
+                            verify_button.disable()
                         download = ui.button(
                             t("Baixar áudio"), icon="download", on_click=lambda: ui.download.file(generated["path"])
                         ).props("flat no-caps")

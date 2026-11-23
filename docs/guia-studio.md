@@ -1,11 +1,13 @@
-# Guia do F5 Studio 1.3.5
+# Guia do F5 Studio
 
 O F5 Studio roda localmente. Você pode gerar voz em WAV ou MP3, guardar referências, narrar
-histórias com vozes por personagem, transcrever e traduzir legendas, editar áudios e ajustar
-checkpoints F5-TTS para inferência.
+histórias com vozes por personagem, transcrever e traduzir legendas, dublar vídeos com IA
+ou gravação humana, editar a montagem e ajustar checkpoints F5-TTS para inferência.
 
 - [Instalação e atualização](#instalação-e-atualização)
 - [Primeiro áudio](#primeiro-áudio)
+- [Dublagem de vídeo](#dublagem-de-vídeo)
+- [Editor de vídeo avançado](#editor-de-vídeo-avançado)
 - [Treinamento de voz](#treinamento-de-voz)
 - [BigVGAN](#bigvgan)
 - [Quantização INT8](#quantização-int8)
@@ -14,37 +16,19 @@ checkpoints F5-TTS para inferência.
 
 ## Instalação e atualização
 
-Use Python 3.11 a 3.15, FFmpeg com `ffprobe` e, no Linux, `libsndfile`. O README indica
-Python 3.12 como ambiente de referência. A preparação de dados e a inferência podem usar CPU.
-O treino pela interface usa uma GPU NVIDIA com PyTorch CUDA. Para o treinamento completo e
-o BigVGAN, use uma cópia editável do repositório.
+A instalação de referência usa Python 3.15, FFmpeg com FFprobe e ambientes separados
+para o Studio, Chatterbox e Demucs. Consulte os comandos para Linux/WSL2 e Windows
+PowerShell no [README](../README.md#instalação).
 
-Em Linux ou WSL, instale FFmpeg e as bibliotecas do sistema conforme o [README](../README.md#requirements).
-Depois clone o repositório, prepare o ambiente virtual e instale a distribuição do PyTorch adequada
-ao hardware. Use a opção CUDA para treino e CPU para estações sem GPU. [Seletor oficial do PyTorch](https://pytorch.org/get-started/locally/)
+O launcher `bash iniciar-studio.sh` usa `.studio/interface-python315` e inicia em
+[http://127.0.0.1:7862](http://127.0.0.1:7862). Para apontá-lo para outro ambiente
+Python 3.15 com o Studio instalado, defina `F5_STUDIO_UI_PYTHON`. O comando também
+aceita `--no-browser`, `--port` e `--workspace`.
 
-```bash
-git clone https://github.com/bolderfox12/F5-TTS.git
-cd F5-TTS
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e ".[studio]"
-python -m pip check
-f5-tts_studio --workspace "$PWD/.studio"
-```
-
-O launcher local `bash iniciar-studio.sh` usa o ambiente Python 3.15 em
-`.studio/interface-python315`. Para apontar para outro ambiente 3.15 com o
-Studio instalado, defina `F5_STUDIO_UI_PYTHON` com o caminho do interpretador.
-
-Abra **http://127.0.0.1:7862**. No Windows, use `py -3.12 -m venv .venv`, ative
-`.venv\Scripts\Activate.ps1` e inicie com `f5-tts_studio`. O comando aceita `--no-browser`,
-`--port` e `--workspace`.
-
-Para atualizar uma instalação editável, use `git pull --ff-only` e
-`python -m pip install -e ".[studio]"`. Reinicie com o mesmo launcher ou `--workspace`
-para manter acesso aos dados anteriores. A primeira geração pode baixar os pesos do modelo
-e do vocoder. Whisper e NLLB usam caches próprios dentro do cache de modelos do ambiente.
+Ao atualizar, mantenha o mesmo workspace para preservar montagens, biblioteca,
+modelos e histórico. Prepare os dados e faça inferência em CPU ou, conforme o modelo,
+use CUDA. O treino guiado requer GPU NVIDIA com PyTorch CUDA. Para BigVGAN e
+treinamento completo, use um clone editável.
 
 ## Primeiro áudio
 
@@ -63,24 +47,8 @@ para sintetizar o áudio e influencia a pronúncia do idioma.
 
 ### Chatterbox Multilingual V3 com Python 3.15
 
-Na raiz do F5-TTS, crie um ambiente Python 3.15 no workspace do Studio e instale o
-[Chatterbox oficial](https://github.com/resemble-ai/chatterbox) a partir do código-fonte:
-
-```bash
-python3.15 -m venv .studio/chatterbox/.venv
-.studio/chatterbox/.venv/bin/python -m pip install --upgrade pip
-.studio/chatterbox/.venv/bin/python -m pip install \
-  "torch==2.15.0" "torchaudio==2.11.1" --index-url https://download.pytorch.org/whl/cpu
-.studio/chatterbox/.venv/bin/python -m pip install \
-  "chatterbox-tts @ git+https://github.com/resemble-ai/chatterbox.git@master"
-.studio/chatterbox/.venv/bin/python -m pip check
-.studio/chatterbox/.venv/bin/python -c "from chatterbox.mtl_tts import ChatterboxMultilingualTTS"
-```
-
-O exemplo instala PyTorch para CPU. Para CUDA, use o índice do PyTorch adequado à sua GPU.
-O exemplo usa o workspace de `./iniciar-studio.sh`. Com outro `--workspace`, crie o
-ambiente em `chatterbox/.venv` dentro dele. No Windows, use `py -3.15` para criar o
-ambiente e `Scripts/python.exe` para executar os comandos dentro dele.
+Siga a [instalação do Chatterbox no README](../README.md#chatterbox-multilingual-v3).
+Crie o ambiente em `chatterbox/.venv` dentro do workspace que pretende usar.
 
 Em **Criar áudio** e **Regravar com outra voz**, escolha **Chatterbox Multilingual V3** e o idioma do texto.
 Em **Histórias e personagens**, o modelo e o idioma são escolhidos por personagem.
@@ -204,7 +172,7 @@ fora do workspace.
 | Porta 7862 ocupada | Use `f5-tts_studio --port 7870` com o workspace desejado. |
 | Download ou disco cheio | Verifique espaço para pesos, estados de otimizador, checkpoints intermediários e os modelos de transcrição e vocoder. |
 
-A versão foi validada com 49 testes automatizados, navegação no Chromium, síntese BigVGAN na
+A versão 1.3.5 foi validada com 49 testes automatizados, navegação no Chromium, síntese BigVGAN na
 RTX 3080 Ti e síntese INT8 em CPU x86. Um treino sintético de dois processos em CPU validou
 lotes distribuídos, acumulação, validação e checkpoints. O ambiente de teste tinha uma única GPU
 física. [Notas da versão](releases/v1.3.5.md)
@@ -265,21 +233,11 @@ deixar resíduos da voz original em áudios difíceis.
 
 #### Instalar o Demucs para preservar o fundo
 
-O Studio usa `demucs` no PATH, o comando indicado em `F5_STUDIO_DEMUCS` ou um
-ambiente isolado em `<workspace>/demucs/.venv`. Exemplo em Linux com `uv` e CPU:
-
-```bash
-uv venv --python 3.12 .studio/demucs/.venv
-uv pip install --python .studio/demucs/.venv/bin/python \
-  --index https://download.pytorch.org/whl/cpu \
-  'torch==2.8.0+cpu' 'torchaudio==2.8.0+cpu' 'demucs==4.0.1' soundfile
-```
-
+Use o [ambiente separado do Demucs](../README.md#demucs-para-música-e-efeitos).
 Os pesos são baixados no primeiro uso. Com o volume de fundo em 0%, a separação
 não é necessária. Os WAVs e exportações de cada revisão ficam em
 `<workspace>/outputs/dubbing/<id-do-projeto>`. A revisão é aberta na sessão da
 página.
-
 
 #### Gravar takes humanos e combinar com IA
 
@@ -319,7 +277,7 @@ nova com cópias dos clipes. Também é possível criar faixas vazias com
 **Adicionar faixa de áudio**.
 Vídeos com som entram com imagem e áudio vinculados. O áudio tem pitch
 ajustável de −48 a +48 semitons, sem mudar a duração da faixa. Clique com o
-botão direito no áudio e escolha **Pitch e equalizador** para ajustar pitch,
+botão direito no áudio e escolha **Efeitos de áudio** para ajustar a altura do som,
 graves, médios e agudos por clipe. Em projetos antigos,
 selecione um vídeo com som e use **Separar áudio do vídeo**.
 Use **Adicionar texto** para escrever um título editável na faixa TX.
@@ -328,9 +286,42 @@ A faixa V1 é o vídeo principal e V2 aparece sobreposta no canto. A1 e A2 podem
 combinar voz, música e efeitos. A faixa CC incorpora as legendas e gera o SRT.
 No clipe da faixa V1, use **Efeitos de vídeo** pelo botão direito ou pela
 barra acima da timeline. Ajuste HSL, Lab com inversão de luminosidade,
-Gradient Map, Pinch and Punch e Swirl separadamente. Os efeitos podem ser
+mapa de gradiente, contração e expansão e redemoinho separadamente. Os efeitos podem ser
 combinados. Alterar um controle ativa o efeito automaticamente. Use
 **Aplicar e gerar prévia** para conferir o resultado no trecho do clipe.
 
+Em **Transições**, selecione o clipe de entrada e escolha dissolução,
+entrada a partir do preto ou deslizamento. Para uma passagem entre dois
+clipes de vídeo, ative a sobreposição com o clipe anterior.
+Nas faixas de áudio, ajuste a entrada e a saída gradual individualmente
+ou use **Mesclar com o áudio anterior** para criar uma transição cruzada.
+A mescla move o clipe para criar a sobreposição e aplica os dois ajustes de volume.
+
 As configurações oferecem HD, Full HD e formato vertical. Gere uma prévia e
 exporte MP4 e SRT quando estiver pronto.
+
+### Console de IA para vídeos do YouTube
+
+No **Editor de vídeo avançado**, abra um projeto e clique em **Console de IA** acima da linha do tempo. Escolha **Gemini**, usando a chave cadastrada nas configurações, ou **Ollama local**, selecionando um modelo instalado, como Qwen.
+
+Digite um comando ou escolha **Gravar comando** e depois **Transcrever comando**. Confira o texto antes de clicar em **Sugerir alterações**. Use nomes de clipes, a seleção atual e tempos da linha do tempo para indicar os trechos.
+
+- Peça cortes, ajustes de volume, fades, mesclas de áudio, dissoluções, legendas com texto informado, títulos e chamadas para inscrição.
+- Configure 1080p horizontal para o YouTube ou o formato vertical para Shorts.
+- Informe o tema e os tempos dos trechos para receber sugestões de título, descrição, texto de capa e capítulos.
+
+Confira as mudanças listadas e clique em **Aplicar e gerar prévia**. O console trabalha com os dados da linha do tempo. Para indicar onde cortar uma fala ou cena, informe o tempo do trecho.
+
+### Estúdio YouTube
+
+O menu **Estúdio YouTube** permite salvar o nome, nicho, público, palavras monitoradas, idioma e região de cada canal. Brasil, português e fuso de Brasília são usados como padrões. Adicione pautas manualmente ou configure uma chave da YouTube Data API e use **Buscar agora** para consultar vídeos recentes. Cada resultado conserva título, link, canal de origem e data informada pela API. Pautas repetidas no mesmo canal são deduplicadas.
+
+Esta primeira etapa salva perfis e oportunidades no workspace local. A coleta automática, roteiro por cenas, geração de mídia e voz, montagem assistida, OAuth, envio e calendário entram nas próximas etapas. A chave da API fica no arquivo local de credenciais do Studio e nenhuma publicação é feita por esta tela.
+
+Ao abrir **Roteiro e cenas** em uma pauta, escolha Gemini ou Ollama e gere um roteiro estruturado com ângulo, promessa, fatos a confirmar, narração e direção visual por cena. Revise o JSON e use **Salvar roteiro e montar timeline** para criar um projeto normal do editor, com narração como legendas de referência e textos de tela em suas faixas. A voz e as mídias das cenas serão adicionadas nas próximas etapas.
+
+### Voz local expressiva
+
+Na tela **Criar áudio**, escolha uma intenção narrativa na revisão de roteiro para orientar o ritmo e a pontuação com o modelo de revisão selecionado. Para modelos F5-TTS, ajuste a velocidade de 0,5× a 2× por geração. O Chatterbox mantém os controles próprios do modelo. Depois da síntese, abra **Conferir pronúncia e texto com Whisper** para comparar a fala reconhecida com o roteiro e ouvir o resultado.
+
+No **Estúdio YouTube**, a área **Narração por cena** usa referências de voz salvas e os modelos locais já disponíveis. Cada fala é gerada individualmente, colocada na faixa A1 e alinhada pela duração real. Regerar uma cena atualiza esse trecho e reposiciona as cenas seguintes.

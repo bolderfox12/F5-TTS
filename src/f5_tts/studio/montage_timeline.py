@@ -5,7 +5,17 @@ from nicegui.element import Element
 
 class MontageTimeline(Element, component="montage_timeline.js"):
     def __init__(
-        self, t, player, on_select, on_move, on_seek, on_split, on_duplicate, on_audio_effects, on_video_effects
+        self,
+        t,
+        player,
+        on_select,
+        on_move,
+        on_seek,
+        on_split,
+        on_duplicate,
+        on_audio_effects,
+        on_video_effects,
+        on_transitions,
     ):
         super().__init__()
         self._props.update(
@@ -26,10 +36,11 @@ class MontageTimeline(Element, component="montage_timeline.js"):
                 "TX": t("Texto"),
                 "duplicate": t("Duplicar clipe"),
                 "duplicateTrack": t("Duplicar faixa"),
-                "audioEffects": t("Pitch e equalizador"),
+                "audioEffects": t("Efeitos de áudio"),
+                "transitions": t("Transições"),
                 "videoEffects": t("Efeitos de vídeo"),
                 "audioTrack": t("Áudio"),
-                "fx": "FX",
+                "fx": t("Efeitos"),
                 "shortcut": t("S · dividir no cursor"),
             },
         )
@@ -40,12 +51,17 @@ class MontageTimeline(Element, component="montage_timeline.js"):
         self.on("duplicate", on_duplicate)
         self.on("audio-effects", on_audio_effects)
         self.on("video-effects", on_video_effects)
+        self.on("transitions", on_transitions)
 
     def update_clips(self, clips, selected, length, audio_tracks):
         self._props.update(
             clips=[
                 {
-                    **{key: clip[key] for key in ("id", "name", "start", "track", "in", "out", "has_audio")},
+                    **{key: clip[key] for key in ("id", "name", "start", "track", "in", "out", "has_audio", "kind")},
+                    "transition": (
+                        clip.get("video_transition", {}).get("kind", "none") != "none"
+                        or any(clip.get("audio_transition", {}).get(key, 0) for key in ("fade_in", "fade_out"))
+                    ),
                     "fx": any(effect.get("enabled") for effect in clip.get("video_effects", {}).values()),
                 }
                 for clip in clips

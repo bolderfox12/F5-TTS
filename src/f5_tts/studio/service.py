@@ -768,6 +768,7 @@ class StudioService(StoryTools, LocalTools):
         stereo=False,
         *,
         language=chatterbox.DEFAULT_LANGUAGE,
+        speech_speed=None,
         cancel_event=None,
         _part_directory=None,
         _part_progress=None,
@@ -776,6 +777,8 @@ class StudioService(StoryTools, LocalTools):
             raise ValueError("Escreva o texto que deseja transformar em voz.")
         if output_format not in ("wav", "mp3") or output_quality not in ("high", "standard", "compact"):
             raise ValueError("Escolha um formato e uma qualidade de áudio válidos.")
+        if speech_speed is not None and (not isinstance(speech_speed, (int, float)) or not 0.5 <= speech_speed <= 2):
+            raise ValueError("O ritmo da fala deve ficar entre 0,5× e 2×.")
         if _part_directory is None and not self._operation.acquire(blocking=False):
             raise ValueError("Aguarde a operação atual ou pare o treinamento antes de gerar áudio.")
 
@@ -831,6 +834,7 @@ class StudioService(StoryTools, LocalTools):
                     )
                 architecture, model_name = selected["architecture"], selected["name"]
             settings = data["settings"]
+            selected_speed = settings["speed"] if speech_speed is None else float(speech_speed)
             version = self.model_version(checkpoint)
             if using_chatterbox:
                 if self._model is not None:
@@ -879,7 +883,7 @@ class StudioService(StoryTools, LocalTools):
                         ref_text=transcript or "",
                         gen_text=spoken_text,
                         nfe_step=settings["steps"],
-                        speed=settings["speed"],
+                        speed=selected_speed,
                         seed=42,
                         progress=None,
                         progress_callback=progress.update,
@@ -905,7 +909,7 @@ class StudioService(StoryTools, LocalTools):
                 "model_name": model_name,
                 "architecture": architecture,
                 "steps": settings["steps"],
-                "speed": settings["speed"],
+                "speed": selected_speed,
                 "format": output_format,
                 "quality": output_quality,
                 "noise_reduction": bool(remove_noise),

@@ -12,12 +12,22 @@ import soundfile as sf
 
 from f5_tts.studio.local_tools import subtitles
 from f5_tts.studio.montage_fx import validate_video_effects, video_effect_filters
+from f5_tts.studio.montage_transitions import audio_fades, validate_transitions, video_transition
 from f5_tts.studio.video_dubbing import VIDEO_EXTENSIONS, _convert, _publish_video
 from f5_tts.studio.video_editor import MUSIC_EXTENSIONS, MUSIC_INPUT
 from f5_tts.studio.video_probe import VIDEO_INPUT, video_media_info
 
 TRACKS = {"video": ("V1", "V2"), "audio": ("A1", "A2"), "caption": ("CC",), "text": ("TX",)}
-PROFILES = {"720p": (1280, 720), "1080p": (1920, 1080), "vertical": (720, 1280)}
+PROFILES = {
+    "480p": (854, 480),
+    "720p": (1280, 720),
+    "1080p": (1920, 1080),
+    "4k": (3840, 2160),
+    "vertical": (720, 1280),
+    "square": (1080, 1080),
+    "portrait": (1080, 1350),
+    "cinema": (2560, 1080),
+}
 PITCH_LIMIT = 48
 EQ_LIMIT = 12
 EQ_BANDS = {
@@ -210,6 +220,7 @@ def validate_clip(clip):
     )
     if not valid_track or not 0 <= clip["volume"] <= 200:
         raise ValueError("Confira a faixa e o volume do clipe.")
+    validate_transitions(clip)
     if clip["kind"] == "video":
         validate_video_effects(clip.get("video_effects", {}))
     pitch = clip.get("pitch", 0)
@@ -221,6 +232,8 @@ def validate_clip(clip):
         for key, gain in equalizer.items()
     ):
         raise ValueError("Ajuste o equalizador entre -12 e +12 dB por faixa.")
+    if clip["kind"] == "caption" and "text" in clip and not clip["text"].strip():
+        raise ValueError("Preencha o texto da legenda.")
     if clip["kind"] == "text" and (not clip.get("text", "").strip() or not 12 <= clip.get("font_size", 48) <= 150):
         raise ValueError("Preencha o texto e escolha um tamanho de fonte válido.")
 
@@ -261,6 +274,11 @@ def split_at(clips, clip, position):
         point = round(position - row["start"] + row["in"], 3)
         left = {**row, "out": point}
         right = {**row, "id": uuid4().hex, "in": point, "start": row["start"] + point - row["in"], "link": right_link}
+        if row.get("audio_transition"):
+            left["audio_transition"] = {**row["audio_transition"], "fade_out": 0}
+            right["audio_transition"] = {**row["audio_transition"], "fade_in": 0}
+        if row.get("video_transition"):
+            right.pop("video_transition", None)
         validate_clip(left)
         validate_clip(right)
         result.extend((left, right))
@@ -335,7 +353,10 @@ def render_montage(service, project, *, preview=False):
     length = sequence_duration(clips)
     if not clips or length < 0.01 or all(clip["kind"] == "caption" for clip in clips):
         raise ValueError("Adicione um vídeo ou áudio à linha do tempo.")
-    width, height = PROFILES["720p" if preview and project["profile"] == "1080p" else project["profile"]]
+    width, height = PROFILES[project["profile"]]
+    if preview and max(width, height) > 1280:
+        scale = 1280 / max(width, height)
+        width, height = (int(width * scale) // 2 * 2, int(height * scale) // 2 * 2)
     outputs = service.outputs / "video-editor" / project["id"]
     outputs.mkdir(parents=True, exist_ok=True)
     target = outputs / f"{uuid4().hex}-{'previa' if preview else 'montagem'}.mp4"
@@ -364,6 +385,7 @@ def render_montage(service, project, *, preview=False):
                     *effects,
                     f"atrim=duration={trim:.6f}",
                     "aformat=channel_layouts=stereo",
+                    *audio_fades(clip),
                     f"volume={clip['volume'] / 100:.4f}",
                     f"adelay={round(clip['start'] * 1000)}:all=1",
                 ]
@@ -374,16 +396,17 @@ def render_montage(service, project, *, preview=False):
         for index, clip in sorted(video_layers, key=lambda pair: (pair[1]["track"], pair[1]["start"])):
             inset = clip["track"] == "V2"
             w, h = (width // 3 // 2 * 2, height // 3 // 2 * 2) if inset else (width, height)
+            transition, placement = video_transition(clip, "W-w-24" if inset else "0", "H-h-24" if inset else "0")
             chain = [
                 f"scale={w}:{h}:force_original_aspect_ratio=decrease:force_divisible_by=2",
                 *video_effect_filters(clip.get("video_effects", {}), directory, index),
                 f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2",
                 "setsar=1",
                 "fps=30",
+                *transition,
                 f"setpts=PTS-STARTPTS+{clip['start']:.6f}/TB",
             ]
             graph.append(f"[{index}:v:0]{','.join(chain)}[v{index}]")
-            placement = "W-w-24:H-h-24" if inset else "0:0"
             last = clip["start"] + clip["out"] - clip["in"]
             graph.append(
                 f"[{video}][v{index}]overlay={placement}:eof_action=pass:repeatlast=0:"
@@ -403,7 +426,12 @@ def render_montage(service, project, *, preview=False):
             video = f"text{index}"
         for clip in clips:
             if clip["kind"] == "caption":
-                cues.extend(_read_cues(service._managed_asset(clip["path"]), clip))
+                if clip.get("text"):
+                    cues.append(
+                        {"start": clip["start"], "end": clip["start"] + clip["out"] - clip["in"], "text": clip["text"]}
+                    )
+                else:
+                    cues.extend(_read_cues(service._managed_asset(clip["path"]), clip))
         cues.sort(key=lambda row: row["start"])
         if cues:
             (directory / "captions.srt").write_text(subtitles(cues), encoding="utf-8")
