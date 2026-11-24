@@ -1,6 +1,8 @@
 """Transcribe, translate and replace the soundtrack of an uploaded video."""
 
+import hashlib
 import logging
+import math
 import shutil
 import subprocess
 import tempfile
@@ -12,10 +14,13 @@ import numpy as np
 import soundfile as sf
 
 from f5_tts.studio import chatterbox_backend as chatterbox
+from f5_tts.studio.demucs_backend import separate_track
+from f5_tts.studio.dubbing_transcript import transcript_warnings
 from f5_tts.studio.local_tools import LANGUAGES, subtitles
 from f5_tts.studio.script_review import transcribe_gemini_dialogue, translate_gemini_dialogue
-from f5_tts.studio.video_probe import video_duration
+from f5_tts.studio.video_probe import VIDEO_INPUT, video_duration
 from f5_tts.studio.transcription_gaps import merge_recovered, recovery_windows
+from f5_tts.studio.vocal_profiles import estimate_profile, estimate_samples, keep_distinct_profiles
 
 
 VIDEO_EXTENSIONS = (".mp4", ".mov", ".mkv", ".webm")
@@ -143,14 +148,44 @@ def _tools(service):
     return ffmpeg, python
 
 
-def _assign_speakers(embeddings, segments):
-    vectors = np.asarray(embeddings)
+def _assign_speakers(embeddings, segments, speaker_count=None, *, profiles=None):
+    vectors = np.array(embeddings, dtype=float)
     vectors /= np.maximum(np.linalg.norm(vectors, axis=1, keepdims=True), 1e-8)
-    groups = []
-    labels = [0] * len(segments)
     # Longer clips establish speaker identities before short replies are assigned.
     durations = [segment["end"] - segment["start"] for segment in segments]
-    for index in sorted(range(len(segments)), key=durations.__getitem__, reverse=True):
+    order = sorted(range(len(segments)), key=durations.__getitem__, reverse=True)
+    if speaker_count is not None:
+        from scipy.cluster.hierarchy import cut_tree, linkage
+        from scipy.spatial.distance import squareform
+
+        count = min(speaker_count, len(order))
+        if count == 1:
+            return [1] * len(segments)
+        anchors = order[: max(count, sum(duration >= 1 for duration in durations))]
+        if profiles:
+            for profile in ("masculine", "feminine"):
+                match = next((index for index in order if profiles[index] == profile), None)
+                if match is not None and match not in anchors:
+                    anchors.append(match)
+        anchor_vectors = vectors[anchors]
+        distances = np.clip(1 - anchor_vectors @ anchor_vectors.T, 0, 2)
+        if profiles:
+            known = np.array([profiles[index] for index in anchors])
+            distances += 3 * ((known[:, None] != known) & (known[:, None] != "unknown") & (known != "unknown"))
+        np.fill_diagonal(distances, 0)
+        tree = linkage(squareform(distances, checks=False), method="average")
+        anchor_labels = cut_tree(tree, n_clusters=count).ravel()
+        centers = np.stack([anchor_vectors[anchor_labels == label].mean(axis=0) for label in range(count)])
+        centers /= np.maximum(np.linalg.norm(centers, axis=1, keepdims=True), 1e-8)
+        labels = (vectors @ centers.T).argmax(axis=1).tolist()
+        for index, label in zip(anchors, anchor_labels, strict=True):
+            labels[index] = int(label)
+        ordered = {label: index for index, label in enumerate(dict.fromkeys(labels), 1)}
+        return [ordered[label] for label in labels]
+
+    groups = []
+    labels = [0] * len(segments)
+    for index in order:
         vector = vectors[index]
         similarities = [float(vector @ (group / max(np.linalg.norm(group), 1e-8))) for group in groups]
         match = int(np.argmax(similarities)) if similarities else 0
@@ -164,6 +199,101 @@ def _assign_speakers(embeddings, segments):
     return [ordered[label] for label in labels]
 
 
+def _extract_original_audio(ffmpeg, source, audio):
+    _convert(
+        ffmpeg,
+        "-protocol_whitelist",
+        "file",
+        "-format_whitelist",
+        "mov,matroska,webm",
+        "-i",
+        source,
+        "-map",
+        "0:a:0",
+        "-af",
+        "aresample=async=1:first_pts=0",
+        "-vn",
+        "-ac",
+        1,
+        "-ar",
+        16000,
+        audio,
+    )
+
+
+def dubbing_stems(service, ffmpeg, source, *, report=None):
+    source = service.managed_upload(source)
+    info = source.stat()
+    key = hashlib.sha256(f"{source}:{info.st_size}:{info.st_mtime_ns}".encode()).hexdigest()
+    cache = service.outputs / "dubbing-stems" / key
+    vocals, background = cache / "vocals.wav", cache / "no_vocals.wav"
+    if vocals.is_file() and background.is_file():
+        if report:
+            report(0.14, "Reutilizando a voz e o fundo já separados…")
+        return vocals, background
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="demucs-", dir=cache.parent) as temp:
+        work = Path(temp)
+        track = work / "source.wav"
+        _convert(
+            ffmpeg,
+            *VIDEO_INPUT,
+            "-i",
+            source,
+            "-map",
+            "0:a:0",
+            "-af",
+            "aresample=async=1:first_pts=0",
+            "-ar",
+            44100,
+            "-ac",
+            2,
+            track,
+        )
+        separated = separate_track(service, track, work, report=report)
+        cache.mkdir(exist_ok=True)
+        separated[0].replace(vocals)
+        separated[1].replace(background)
+    return vocals, background
+
+
+def check_vocal_profiles(service, source, segments, *, on_progress=None):
+    source = service.managed_upload(source)
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise ValueError("Instale o FFmpeg para conferir o áudio original.")
+    results = []
+    with tempfile.TemporaryDirectory(prefix="f5-vocal-check-") as folder:
+        path = Path(folder) / "original.wav"
+        _extract_original_audio(ffmpeg, source, path)
+        with sf.SoundFile(path) as audio:
+            rate = audio.samplerate
+            duration = audio.frames / rate
+            for index, row in enumerate(segments, 1):
+                start, end = row["start"], row["end"]
+                profile = "unknown"
+                if start is not None and end is not None and 0 <= start < end <= duration + 0.001:
+                    first = round(start * rate)
+                    remaining = min(audio.frames, round(end * rate)) - first
+                    audio.seek(first)
+                    detected = set()
+                    while remaining >= rate // 3 and len(detected) < 2:
+                        frames = min(4 * rate, remaining)
+                        samples = audio.read(frames, dtype="float32")
+                        remaining -= frames
+                        estimate = estimate_samples(samples, rate)
+                        if estimate != "unknown":
+                            detected.add(estimate)
+                    if len(detected) == 1:
+                        profile = detected.pop()
+                results.append({"start": start, "end": end, "profile": profile})
+                if on_progress:
+                    on_progress(
+                        index / len(segments), "Conferindo fala {done} de {total}…", done=index, total=len(segments)
+                    )
+    return results
+
+
 def analyze_video(
     service,
     source,
@@ -173,6 +303,9 @@ def analyze_video(
     gemini_key="",
     on_progress=None,
     recover_missing=False,
+    speaker_count=None,
+    separate_vocals=False,
+    time_range=None,
 ):
     def report(value, message):
         if on_progress:
@@ -183,6 +316,19 @@ def analyze_video(
         raise ValueError("Envie um vídeo MP4, MOV, MKV ou WebM de até 500 MB.")
     if source_language not in LANGUAGES:
         raise ValueError("Idioma não suportado pelo seletor.")
+    if speaker_count is not None and (type(speaker_count) is not int or speaker_count < 1):
+        raise ValueError("Informe um número inteiro de vozes ou deixe a quantidade em branco.")
+    offset = 0.0
+    selected_duration = None
+    if time_range is not None:
+        try:
+            offset, selected_end = map(float, time_range)
+        except (TypeError, ValueError) as error:
+            raise ValueError("Selecione um intervalo válido na linha do tempo.") from error
+        duration = video_duration(source)
+        if not math.isfinite(offset) or not math.isfinite(selected_end) or not 0 <= offset < selected_end <= duration:
+            raise ValueError("O intervalo selecionado precisa estar dentro da duração do vídeo.")
+        selected_duration = selected_end - offset
     use_gemini = model_id == GEMINI_TRANSCRIPTION
     if use_gemini:
         if service.read().get("offline"):
@@ -193,38 +339,42 @@ def analyze_video(
         ffmpeg = shutil.which("ffmpeg")
         if ffmpeg is None:
             raise ValueError("Instale o FFmpeg para dublar vídeos.")
+        python = chatterbox.chatterbox_python(service.home) if speaker_count is not None else None
     else:
         ffmpeg, python = _tools(service)
     directory = Path(tempfile.mkdtemp(prefix="dublagem-", dir=service.uploads))
     try:
         report(0.08, "Extraindo áudio do vídeo…")
         audio = directory / "original.wav"
-        _convert(
-            ffmpeg,
-            "-protocol_whitelist",
-            "file",
-            "-format_whitelist",
-            "mov,matroska,webm",
-            "-i",
-            source,
-            "-map",
-            "0:a:0",
-            "-af",
-            "aresample=async=1:first_pts=0",
-            "-vn",
-            "-ac",
-            1,
-            "-ar",
-            16000,
-            audio,
-        )
+        if separate_vocals:
+            vocals, _ = dubbing_stems(service, ffmpeg, source, report=report)
+            _convert(ffmpeg, "-protocol_whitelist", "file", "-i", vocals, "-ac", 1, "-ar", 16000, audio)
+        else:
+            _extract_original_audio(ffmpeg, source, audio)
+        analysis_audio = audio
+        if time_range is not None:
+            analysis_audio = directory / "selected.wav"
+            _convert(
+                ffmpeg,
+                "-ss",
+                f"{offset:.6f}",
+                "-i",
+                audio,
+                "-t",
+                f"{selected_duration:.6f}",
+                "-ac",
+                1,
+                "-ar",
+                16000,
+                analysis_audio,
+            )
         if use_gemini:
             report(0.30, "Preparando o áudio para o Gemini…")
             compressed = directory / "gemini.mp3"
-            _convert(ffmpeg, "-i", audio, "-c:a", "libmp3lame", "-b:a", "48k", compressed)
+            _convert(ffmpeg, "-i", analysis_audio, "-c:a", "libmp3lame", "-b:a", "48k", compressed)
             if compressed.stat().st_size > GEMINI_AUDIO_LIMIT:
                 raise ValueError("O áudio excede o limite do Gemini nesta tela. Use um trecho menor ou o Whisper.")
-            with wave.open(str(audio), "rb") as speech:
+            with wave.open(str(analysis_audio), "rb") as speech:
                 duration = speech.getnframes() / speech.getframerate()
             report(0.45, "Aguardando transcrição e personagens do Gemini…")
             encoded = compressed.read_bytes()
@@ -234,9 +384,10 @@ def analyze_video(
                 source_language,
                 gemini_key,
                 allow_empty=recover_missing,
+                speaker_count=speaker_count,
             )
             if recover_missing:
-                samples, rate = sf.read(audio, dtype="float32")
+                samples, rate = sf.read(analysis_audio, dtype="float32")
                 windows = recovery_windows(samples, rate, segments)
                 if windows:
                     report(0.62, "Revisando intervalos sem transcrição…")
@@ -247,6 +398,7 @@ def analyze_video(
                             source_language,
                             gemini_key,
                             recovery=(windows, segments),
+                            speaker_count=speaker_count,
                         )
                         segments = merge_recovered(segments, additions, windows)
                     except ValueError:
@@ -257,14 +409,33 @@ def analyze_video(
         else:
             report(0.36, "Transcrevendo com Whisper…")
             segments = service._transcribe_audio(
-                str(audio),
+                str(analysis_audio),
                 source_language,
                 model_id,
                 save_record=False,
                 return_segments=True,
                 recover_missing=recover_missing,
                 on_recovery=lambda: report(0.62, "Revisando intervalos sem transcrição…"),
+                short_lines=True,
+                on_review=lambda: report(0.55, "Rechecando falas com palavras repetidas…"),
             )
+        if offset:
+            segments = [{**row, "start": row["start"] + offset, "end": row["end"] + offset} for row in segments]
+        report(0.65, "Conferindo repetições e trechos silenciosos…")
+        warnings = transcript_warnings(segments)
+        segments = [row for row, warning in zip(segments, warnings, strict=True) if warning != "duplicate"]
+        with sf.SoundFile(audio) as speech:
+            audible = []
+            for row in segments:
+                first = min(speech.frames, max(0, round(row["start"] * speech.samplerate)))
+                last = min(speech.frames, round(row["end"] * speech.samplerate))
+                speech.seek(first)
+                samples = speech.read(max(0, last - first), dtype="float32")
+                if samples.size and np.any(np.abs(samples) >= 0.0003):
+                    audible.append(row)
+        segments = audible
+        if not segments:
+            raise ValueError("Não foi reconhecida fala no áudio original.")
         report(0.72, "Extraindo as referências de voz…")
         references = []
         with wave.open(str(audio), "rb") as speech:
@@ -278,26 +449,34 @@ def analyze_video(
                     output.setparams(speech.getparams())
                     output.writeframes(frames.ljust(rate * speech.getsampwidth(), b"\0"))
                 references.append(sample)
+        report(0.82, "Analisando os perfis vocais…")
+        profiles = [estimate_profile(sample) for sample in references]
         if use_gemini:
             labels = [segment["speaker"] for segment in segments]
-        else:
+        if not use_gemini or (python is not None and python.is_file()):
             report(0.88, "Identificando personagens pelas vozes…")
-            embeddings = chatterbox.identify_voices(
-                python,
-                references,
-                directory / "vozes.json",
-                offline=bool(service.read().get("offline")),
-            )
-            labels = _assign_speakers(embeddings, segments)
+            try:
+                embeddings = chatterbox.identify_voices(
+                    python,
+                    references,
+                    directory / "vozes.json",
+                    offline=bool(service.read().get("offline")),
+                )
+                labels = _assign_speakers(embeddings, segments, speaker_count, profiles=profiles)
+            except (OSError, ValueError):
+                if not use_gemini:
+                    raise
+                logging.getLogger(__name__).warning("Local voice separation unavailable", exc_info=True)
     except Exception:
         shutil.rmtree(directory)
         raise
     audio.unlink()
     (directory / "vozes.json").unlink(missing_ok=True)
     report(0.97, "Preparando os cartões de fala…")
+    labels = keep_distinct_profiles(labels, profiles, [segment["end"] - segment["start"] for segment in segments])
     return [
-        {**segment, "speaker": label, "reference": sample}
-        for segment, label, sample in zip(segments, labels, references, strict=True)
+        {**segment, "speaker": label, "reference": sample, "vocal_profile": profile}
+        for segment, label, sample, profile in zip(segments, labels, references, profiles, strict=True)
     ]
 
 
@@ -316,7 +495,9 @@ def speaker_references(segments):
     return dict(sorted(references.items()))
 
 
-def translate_dialogue(service, segments, source_language, target_language, *, provider="nllb", gemini_key=""):
+def translate_dialogue(
+    service, segments, source_language, target_language, *, provider="nllb", gemini_key="", timing_source=None
+):
     if not segments or any(not segment["text"].strip() for segment in segments):
         raise ValueError("Preencha a transcrição de todos os trechos antes de dublar.")
     if provider == "nllb":
@@ -330,7 +511,50 @@ def translate_dialogue(service, segments, source_language, target_language, *, p
     key = gemini_key.strip() or service.review_api_key("gemini")
     if not key:
         raise ValueError("Informe a chave da API do provedor escolhido.")
-    return translate_gemini_dialogue(segments, source_language, target_language, key)
+    if timing_source is None:
+        return translate_gemini_dialogue(segments, source_language, target_language, key)
+    if any(
+        row["start"] is None
+        or row["end"] is None
+        or not 0 <= row["start"] < row["end"]
+        or not math.isfinite(row["end"])
+        for row in segments
+    ):
+        raise ValueError("Confira o início e o fim de cada fala para adaptar a tradução ao áudio original.")
+    source = service.managed_upload(timing_source)
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise ValueError("Instale o FFmpeg para extrair o áudio original.")
+    with tempfile.TemporaryDirectory(prefix="traducao-") as directory:
+        audio = Path(directory) / "original.mp3"
+        _convert(
+            ffmpeg,
+            "-protocol_whitelist",
+            "file",
+            "-format_whitelist",
+            "mov,matroska,webm",
+            "-i",
+            source,
+            "-map",
+            "0:a:0",
+            "-af",
+            "aresample=async=1:first_pts=0",
+            "-vn",
+            "-ac",
+            1,
+            "-ar",
+            16000,
+            "-c:a",
+            "libmp3lame",
+            "-b:a",
+            "48k",
+            audio,
+        )
+        if audio.stat().st_size > GEMINI_AUDIO_LIMIT:
+            raise ValueError("O áudio excede o limite do Gemini. Use um vídeo mais curto ou traduza apenas o texto.")
+        return translate_gemini_dialogue(
+            segments, source_language, target_language, key, original_audio=audio.read_bytes()
+        )
 
 
 def dub_video(service, source, segments, dialogue, target_language, model_id, *, treat_audio=True):

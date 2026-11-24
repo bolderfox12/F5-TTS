@@ -3,6 +3,8 @@
 from nicegui import ui
 
 from f5_tts.studio.local_tools import srt_time
+from f5_tts.studio.dubbing_transcript import needs_translation_review
+from f5_tts.studio.vocal_profiles import PROFILE_ICONS, PROFILE_LABELS, profile_check_status
 
 
 def speech_card(
@@ -12,6 +14,7 @@ def speech_card(
     translated,
     preview,
     *,
+    number,
     change,
     seek,
     regenerate,
@@ -20,6 +23,11 @@ def speech_card(
     shorten=None,
     suggestions=(),
     apply=None,
+    gemini_style=None,
+    synthesis_state=None,
+    transcript_issue="",
+    remove=None,
+    include=True,
 ):
     with ui.card().classes("studio-card w-full p-4 gap-3") as card:
         badge = ui.badge().props("outline")
@@ -49,6 +57,33 @@ def speech_card(
             js_handler="(event, emit) => { if (!event.target.closest('button,input,textarea,label,audio,[role=combobox]')) emit(); }",
         )
         with ui.row().classes("w-full items-center"):
+            ui.checkbox(
+                t("Incluir na dublagem"),
+                value=include,
+                on_change=lambda event: change("include_in_dub", event.value),
+            ).set_enabled(not busy)
+            profile = row.get("vocal_profile", "unknown")
+            ui.icon(PROFILE_ICONS[profile], size="28px").tooltip(t(PROFILE_LABELS[profile]))
+            ui.label(t("Fala {value_0} · Personagem {value_1}", value_0=number, value_1=row["speaker"])).classes(
+                "font-semibold"
+            )
+            if synthesis_state is not None:
+                synthesis_badge = ui.badge()
+            if transcript_issue:
+                issue_labels = {
+                    "repeat": "Revisar repetição na transcrição",
+                    "duplicate": "Fala duplicada no mesmo trecho",
+                    "nearby": "Revisar fala repetida no trecho vizinho",
+                }
+                ui.badge(t(issue_labels[transcript_issue]), color="deep-orange-9")
+            checked = profile_check_status(row)
+            if checked == "mismatch":
+                detected = t(PROFILE_LABELS[row["vocal_check"]["profile"]])
+                ui.badge(t("Revisar perfil. Áudio sugere {value_0}.", value_0=detected), color="deep-orange-9")
+            elif checked == "unclear":
+                ui.badge(t("Checagem inconclusiva"), color="amber-9", text_color="black")
+            elif checked == "match":
+                ui.badge(t("Perfil compatível"), color="teal-8")
             ui.button(
                 srt_time(row["start"] or 0).replace(",", "."),
                 icon="play_arrow",
@@ -59,6 +94,7 @@ def speech_card(
                 def timing(event, field=key):
                     row[field] = event.value
                     update_badge()
+                    change(field, event.value)
 
                 ui.number(title, value=row[key], min=0, step=0.001, on_change=timing).props("outlined dense").classes(
                     "w-28"
@@ -69,10 +105,21 @@ def speech_card(
                 label=t("Personagem"),
                 on_change=lambda event: change("speaker", event.value),
             ).props("outlined dense").classes("w-44").set_enabled(not busy)
+            ui.select(
+                {key: t(label) for key, label in PROFILE_LABELS.items()},
+                value=profile,
+                label=t("Perfil vocal"),
+                on_change=lambda event: change("vocal_profile", event.value),
+            ).props("outlined dense").classes("w-36").set_enabled(not busy)
+        if row.get("reference"):
+            ui.label(t("Fala original")).classes("text-sm")
+            ui.audio(str(row["reference"])).props("preload=none").classes("w-full max-w-sm")
 
         def replace_translation(event):
             change("translated", event.value)
-            if preview:
+            if synthesis_state is not None:
+                confirm_repeat.set_visibility(needs_translation_review(row, event.value or "", transcript_issue))
+            if preview and synthesis_state is None:
                 mini_player.set_visibility(event.value == translated)
                 badge.set_visibility(event.value == translated)
 
@@ -83,12 +130,41 @@ def speech_card(
             ui.textarea(t("Texto traduzido"), value=translated, on_change=replace_translation).props(
                 "outlined dense autogrow"
             ).set_enabled(not busy)
+        if synthesis_state is not None:
+            confirm_repeat = (
+                ui.button(
+                    t("Confirmar repetição intencional"),
+                    on_click=lambda: change("confirm_repetition", True),
+                )
+                .props("flat no-caps")
+                .set_enabled(not busy)
+            )
+            confirm_repeat.set_visibility(needs_translation_review(row, translated, transcript_issue))
+        if remove:
+            ui.button(t("Excluir fala suspeita"), icon="delete_outline", on_click=remove).props(
+                "flat no-caps"
+            ).set_enabled(not busy)
+        if gemini_style is not None:
+
+            def replace_style(event):
+                change("gemini_style", event.value)
+                if preview and synthesis_state is None:
+                    mini_player.set_visibility(event.value == gemini_style)
+                    badge.set_visibility(event.value == gemini_style)
+
+            ui.input(t("Entonação da fala"), value=gemini_style, on_change=replace_style).props(
+                "outlined dense maxlength=500"
+            ).classes("w-full").set_enabled(not busy).tooltip(
+                t("Exemplo: voz baixa, tensa e com uma pausa antes do final.")
+            )
         if takes_panel:
             takes_panel()
         else:
             with ui.row().classes("w-full items-center"):
-                if preview:
-                    mini_player = ui.audio(preview[0]).classes("w-full max-w-sm")
+                if preview or synthesis_state is not None:
+                    mini_player = (
+                        ui.audio(preview[0] if preview else "").props("preload=none").classes("w-full max-w-sm")
+                    )
                 ui.button(t("Regerar fala"), icon="refresh", on_click=regenerate).props("outline no-caps").set_enabled(
                     not busy
                 )
@@ -111,3 +187,19 @@ def speech_card(
                                 "outline no-caps"
                             ).set_enabled(not busy)
                     ui.label(t("Depois de escolher, regenere a fala para conferir a duração.")).classes("studio-muted")
+
+        if synthesis_state is not None:
+
+            def update_synthesis(clip, state):
+                nonlocal preview
+                if clip != preview:
+                    preview = clip
+                    mini_player.set_source(clip[0] if clip else "")
+                mini_player.set_visibility(clip is not None)
+                synthesis_badge.set_visibility(bool(state))
+                synthesis_badge.set_text(t(state))
+                synthesis_badge.props("color=positive" if state == "OK" else "color=negative")
+                update_badge()
+
+            update_synthesis(preview, synthesis_state)
+            return update_synthesis

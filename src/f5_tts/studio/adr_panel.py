@@ -3,7 +3,7 @@
 from nicegui import ui
 
 
-def take_panel(t, project, segment_id, row, recorder, take_offsets, action, refresh, busy):
+def take_panel(t, project, segment_id, row, recorder, take_offsets, action, refresh, busy, *, save):
     active = project.active_takes.get(segment_id)
     recordings = project.takes.get(segment_id, {})
 
@@ -15,14 +15,17 @@ def take_panel(t, project, segment_id, row, recorder, take_offsets, action, refr
 
     async def choose(take_id=None):
         await action(project.choose_take, segment_id, take_id)
+        save()
         refresh()
 
     async def delete(take_id):
         await action(project.forget_take, segment_id, take_id)
+        save()
         refresh()
 
     def adjust_offset(event):
         take_offsets[segment_id] = int(event.value or 0)
+        save()
 
     with ui.row().classes("w-full items-center"):
         ui.button(t("Gravar com contagem (3-2-1)"), icon="mic", on_click=record).props("no-caps").set_enabled(not busy)

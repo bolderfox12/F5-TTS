@@ -5,12 +5,19 @@ import re
 
 import numpy as np
 
+DISTORTION_CENTER = {
+    "x": ("Centro horizontal (%)", 0, 100, 50),
+    "y": ("Centro vertical (%)", 0, 100, 50),
+}
+PINCH_PUNCH_RADIUS = ("Raio do efeito (%)", 10, 92, 92)
+
 FX_CONTROLS = {
     "hsl": {
         "hue": ("Matiz (°)", -180, 180, 0),
         "saturation": ("Saturação (%)", -100, 100, 0),
         "lightness": ("Luminosidade HSL (%)", -100, 100, 0),
     },
+    "invert": {"amount": ("Inversão de cores (%)", 0, 100, 100)},
     "lab": {
         "lightness": ("Luminosidade L*", -100, 100, 0),
         "green_red": ("Verde ↔ vermelho (a*)", -128, 127, 0),
@@ -19,23 +26,28 @@ FX_CONTROLS = {
     },
     "gradient": {"amount": ("Intensidade do mapa (%)", 0, 100, 100)},
     "pinch": {
-        "amount": ("Contração ↔ expansão (%)", -100, 100, 0),
-        "radius": ("Raio do efeito (%)", 10, 100, 60),
-        "x": ("Centro horizontal (%)", 0, 100, 50),
-        "y": ("Centro vertical (%)", 0, 100, 50),
+        "amount": ("Intensidade da contração (%)", 0, 100, 0),
+        "radius": PINCH_PUNCH_RADIUS,
+        **DISTORTION_CENTER,
+    },
+    "punch": {
+        "amount": ("Intensidade da expansão (%)", 0, 100, 0),
+        "radius": PINCH_PUNCH_RADIUS,
+        **DISTORTION_CENTER,
     },
     "swirl": {
         "angle": ("Rotação do redemoinho (°)", -360, 360, 0),
         "radius": ("Raio do efeito (%)", 10, 100, 60),
-        "x": ("Centro horizontal (%)", 0, 100, 50),
-        "y": ("Centro vertical (%)", 0, 100, 50),
+        **DISTORTION_CENTER,
     },
 }
 FX_TITLES = {
     "hsl": "Ajuste HSL",
+    "invert": "Inverter cores",
     "lab": "Ajuste Lab e inversão de luminosidade",
     "gradient": "Mapa de gradiente",
-    "pinch": "Contração e expansão",
+    "pinch": "Pinch · Contração",
+    "punch": "Punch · Expansão",
     "swirl": "Redemoinho",
 }
 GRADIENT_COLORS = {"shadows": "#20243F", "highlights": "#F9DCA0"}
@@ -53,6 +65,10 @@ def validate_video_effects(effects):
             raise ValueError("Confira as configurações dos efeitos de vídeo.")
         for key, (_, minimum, maximum, default) in FX_CONTROLS[name].items():
             value = values.get(key, default)
+            if name == "pinch" and key == "amount":
+                minimum = -100  # Older projects stored expansion as a negative pinch.
+            if name in ("pinch", "punch") and key == "radius":
+                maximum = 150  # Accept previously saved settings and cap the radius during rendering.
             if not isinstance(value, (int, float)) or not minimum <= value <= maximum:
                 raise ValueError("Confira as configurações dos efeitos de vídeo.")
         if name == "gradient" and any(
@@ -112,13 +128,16 @@ def _gradient(rgb, effects, setting):
     return rgb * (1 - strength) + (shadows + weight * (highlights - shadows)) * strength
 
 
-def _write_lut(path, effects, hsl, lab, gradient):
+def _write_lut(path, effects, hsl, invert, lab, gradient):
     size = 33
     axis = np.linspace(0, 1, size)
     blue, green, red = np.meshgrid(axis, axis, axis, indexing="ij")
     rgb = np.column_stack((red.ravel(), green.ravel(), blue.ravel()))
     if hsl:
         rgb = _hsl(rgb, hsl)
+    if invert:
+        amount = invert["amount"] / 100
+        rgb = rgb * (1 - amount) + (1 - rgb) * amount
     if lab:
         rgb = _lab(rgb, lab)
     if gradient:
@@ -128,8 +147,8 @@ def _write_lut(path, effects, hsl, lab, gradient):
         np.savetxt(stream, np.clip(rgb, 0, 1), fmt="%.7f")
 
 
-def _geometry(setting, *, swirl):
-    radius = setting["radius"] / 100
+def _geometry(setting, *, swirl=False, punch=False):
+    radius = (setting["radius"] if swirl else min(setting["radius"], PINCH_PUNCH_RADIUS[2])) / 100
     center_x, center_y = setting["x"] / 100, setting["y"] / 100
     prefix = (
         f"st(0,2*(X/W-{center_x}));st(1,2*(Y/H-{center_y}));st(2,hypot(ld(0),ld(1)));st(3,max(0,1-ld(2)/{radius}));"
@@ -140,7 +159,7 @@ def _geometry(setting, *, swirl):
         dx = "ld(0)*cos(ld(4))-ld(1)*sin(ld(4))"
         dy = "ld(0)*sin(ld(4))+ld(1)*cos(ld(4))"
     else:
-        amount = setting["amount"] / 100
+        amount = setting["amount"] / (-100 if punch else 100)
         prefix += f"st(4,exp({amount:.8f}*ld(3)*2));"
         dx, dy = "ld(0)*ld(4)", "ld(1)*ld(4)"
     x = f"clip(W*({center_x}+({dx})/2),0,W-1)"
@@ -152,17 +171,19 @@ def video_effect_filters(effects, directory, index):
     if not effects:
         return []
     validate_video_effects(effects)
-    hsl, lab, gradient = (_values(effects, key) for key in ("hsl", "lab", "gradient"))
-    pinch, swirl = _values(effects, "pinch"), _values(effects, "swirl")
+    hsl, invert, lab, gradient = (_values(effects, key) for key in ("hsl", "invert", "lab", "gradient"))
+    pinch, punch, swirl = (_values(effects, key) for key in ("pinch", "punch", "swirl"))
     filters = []
-    if hsl or lab or gradient:
+    if hsl or (invert and invert["amount"]) or lab or gradient:
         name = f"fx-{index}.cube"
-        _write_lut(directory / name, effects, hsl, lab, gradient)
+        _write_lut(directory / name, effects, hsl, invert, lab, gradient)
         filters.extend(("format=gbrp", f"lut3d=file={name}"))
-    if (pinch and pinch["amount"]) or (swirl and swirl["angle"]):
+    if (pinch and pinch["amount"]) or (punch and punch["amount"]) or (swirl and swirl["angle"]):
         filters.append("format=gbrp")
         if pinch and pinch["amount"]:
-            filters.append(_geometry(pinch, swirl=False))
+            filters.append(_geometry(pinch))
+        if punch and punch["amount"]:
+            filters.append(_geometry(punch, punch=True))
         if swirl and swirl["angle"]:
             filters.append(_geometry(swirl, swirl=True))
     if filters:

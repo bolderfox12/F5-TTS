@@ -312,7 +312,7 @@ class StudioService(StoryTools, LocalTools):
             self.write(data)
         return voice
 
-    def settings(self, device, steps, speed, precision=None):
+    def settings(self, device, steps, speed, precision=None, tensorrt_enabled=None, tensorrt_url=None, tensorrt_model=None):
         if device not in ("auto", "cpu", "cuda") or int(steps) not in (16, 32, 48) or not 0.3 <= float(speed) <= 2:
             raise ValueError("Configuração inválida.")
         if device == "cuda" and not torch.cuda.is_available():
@@ -325,7 +325,26 @@ class StudioService(StoryTools, LocalTools):
             settings.update(device=device, steps=int(steps), speed=float(speed))
             if precision is not None:
                 settings["precision"] = precision
+            if tensorrt_enabled is not None:
+                settings["tensorrt_enabled"] = bool(tensorrt_enabled)
+            if tensorrt_url is not None:
+                url = tensorrt_url.strip().rstrip("/")
+                if url and not url.startswith(("http://", "https://")):
+                    raise ValueError("O endereço TensorRT precisa começar com http:// ou https://.")
+                settings["tensorrt_url"] = url
+            if tensorrt_model is not None:
+                model_name = tensorrt_model.strip()
+                if not model_name or len(model_name) > 100:
+                    raise ValueError("Informe um nome válido para o modelo Triton.")
+                settings["tensorrt_model"] = model_name
+            settings.setdefault("tensorrt_model", "f5_tts")
             self.write(data)
+
+    def check_tensorrt(self, url=None):
+        from f5_tts.studio.tensorrt_backend import check_connection
+
+        settings = self.read()["settings"]
+        return check_connection(url if url is not None else settings.get("tensorrt_url", ""), settings.get("tensorrt_model", "f5_tts"))
 
     def hardware(self):
         cuda = torch.cuda.is_available()
@@ -835,11 +854,14 @@ class StudioService(StoryTools, LocalTools):
                 architecture, model_name = selected["architecture"], selected["name"]
             settings = data["settings"]
             selected_speed = settings["speed"] if speech_speed is None else float(speech_speed)
+            using_tensorrt = bool(settings.get("tensorrt_enabled")) and not using_chatterbox
+            if using_tensorrt and (project or checkpoint or model_id != "original"):
+                raise ValueError("O TensorRT configurado atende ao F5-TTS v1 Base original. Desative-o para usar modelos salvos ou treinados.")
             version = self.model_version(checkpoint)
-            if using_chatterbox:
+            if using_chatterbox or using_tensorrt:
                 if self._model is not None:
                     self._release_speech_model()
-            else:
+            elif not using_chatterbox:
                 key = (
                     checkpoint or "",
                     vocabulary,
@@ -876,6 +898,16 @@ class StudioService(StoryTools, LocalTools):
                     chatterbox.synthesize(
                         python, spoken_text, reference, language, settings["device"], source, cancel_event=cancel_event
                     )
+                elif using_tensorrt:
+                    if not transcript or not transcript.strip():
+                        raise ValueError("Para usar TensorRT, selecione uma voz salva com transcrição ou informe o texto do áudio de referência.")
+                    update_progress(True, 8, "Sintetizando pelo servidor TensorRT-LLM.")
+                    from f5_tts.studio.tensorrt_backend import synthesize
+
+                    synthesize(
+                        settings.get("tensorrt_url", ""), reference, transcript, spoken_text, source,
+                        settings.get("tensorrt_model", "f5_tts"),
+                    )
                 else:
                     progress = _InferenceProgress(update_progress)
                     self._model.infer(
@@ -909,6 +941,7 @@ class StudioService(StoryTools, LocalTools):
                 "model_name": model_name,
                 "architecture": architecture,
                 "steps": settings["steps"],
+                "backend": "TensorRT-LLM" if using_tensorrt else "Chatterbox" if using_chatterbox else "PyTorch",
                 "speed": selected_speed,
                 "format": output_format,
                 "quality": output_quality,

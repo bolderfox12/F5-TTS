@@ -205,6 +205,28 @@ def new_audio_track(project):
     return f"A{int(tracks[-1][1:]) + 1}"
 
 
+def video_tracks(clips):
+    tracks = {*TRACKS["video"], *(clip["track"] for clip in clips if clip["kind"] == "video")}
+    return sorted(tracks, key=lambda track: int(track[1:]))
+
+
+def duplicate_track(project, source):
+    clips = project["clips"]
+    members = [clip for clip in clips if clip["track"] == source]
+    if not members:
+        raise ValueError("A faixa selecionada está vazia.")
+    if source in audio_tracks(project):
+        target = new_audio_track(project)
+        project = {**project, "audio_tracks": [*audio_tracks(project), target]}
+    elif source in video_tracks(clips):
+        highest = max(int(clip["track"][1:]) for clip in clips if clip["kind"] == "video")
+        target = f"V{highest + 1}"
+    else:
+        raise ValueError("Escolha uma faixa de vídeo ou áudio para duplicar.")
+    copies = [{**row, "id": uuid4().hex, "track": target, "link": None} for row in members]
+    return {**project, "clips": [*clips, *copies]}, copies[0]["id"]
+
+
 def sequence_duration(clips):
     return max((row["start"] + row["out"] - row["in"] for row in clips), default=0)
 
@@ -215,9 +237,12 @@ def validate_clip(clip):
         raise ValueError("Informe tempos válidos para o clipe.")
     if start < 0 or first < 0 or last - first < 0.01 or last > duration + 0.0005:
         raise ValueError("O corte precisa estar dentro da duração do clipe.")
-    valid_track = (
-        re.fullmatch(r"A[1-9]\d*", clip["track"]) if clip["kind"] == "audio" else clip["track"] in TRACKS[clip["kind"]]
-    )
+    kind = clip["kind"]
+    if kind in ("audio", "video"):
+        prefix = "A" if kind == "audio" else "V"
+        valid_track = re.fullmatch(prefix + r"[1-9]\d*", clip["track"])
+    else:
+        valid_track = clip["track"] in TRACKS[kind]
     if not valid_track or not 0 <= clip["volume"] <= 200:
         raise ValueError("Confira a faixa e o volume do clipe.")
     validate_transitions(clip)
@@ -393,8 +418,8 @@ def render_montage(service, project, *, preview=False):
                 audio.append(f"[{filter_id}]")
         graph.append(f"color=c=0x102632:s={width}x{height}:r=30:d={length:.6f}[base]")
         video = "base"
-        for index, clip in sorted(video_layers, key=lambda pair: (pair[1]["track"], pair[1]["start"])):
-            inset = clip["track"] == "V2"
+        for index, clip in sorted(video_layers, key=lambda pair: (int(pair[1]["track"][1:]), pair[1]["start"])):
+            inset = clip["track"] != "V1"
             w, h = (width // 3 // 2 * 2, height // 3 // 2 * 2) if inset else (width, height)
             transition, placement = video_transition(clip, "W-w-24" if inset else "0", "H-h-24" if inset else "0")
             chain = [

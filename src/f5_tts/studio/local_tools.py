@@ -17,6 +17,7 @@ import torchaudio
 
 from f5_tts.audio import local_audio_input
 from f5_tts.studio import chatterbox_backend as chatterbox
+from f5_tts.studio.dubbing_transcript import normalized_words, repeated_text, same_timed_line
 from f5_tts.studio.transcription_gaps import merge_recovered, recovery_windows
 
 
@@ -381,6 +382,8 @@ class LocalTools:
         return_segments=False,
         recover_missing=False,
         on_recovery=None,
+        short_lines=False,
+        on_review=None,
     ):
         if model_id not in ASR_MODELS:
             raise ValueError("Escolha um modelo de transcrição da lista.")
@@ -417,29 +420,76 @@ class LocalTools:
             def recognize(audio, offset=0, *, retry=False):
                 length = len(audio) / 16000
                 options = {"task": "transcribe", **({"language": language} if language else {})}
+                if short_lines:
+                    options["condition_on_prev_tokens"] = False
                 if retry:
-                    options.update(condition_on_prev_tokens=False, no_speech_threshold=0.8)
+                    # Whisper's silence check also needs the average token log probability.
+                    options.update(
+                        condition_on_prev_tokens=False,
+                        no_speech_threshold=0.8,
+                        logprob_threshold=-1.0,
+                        temperature=(0.0,),
+                    )
                 result = asr(
                     {"array": audio, "sampling_rate": 16000},
                     chunk_length_s=30,
                     batch_size=1,
-                    return_timestamps=True,
+                    return_timestamps="word" if short_lines else True,
                     generate_kwargs=options,
                 )
                 chunks = result.get("chunks") or [{"text": result.get("text", ""), "timestamp": (0, length)}]
                 rows = []
+                words = 0
+                previous_word = None
                 for chunk in chunks:
-                    text = chunk["text"].strip()
+                    raw_text = chunk["text"]
+                    text = raw_text.strip()
                     if not text:
                         continue
                     start, end = chunk.get("timestamp", (0, length))
+                    if short_lines and start is not None and end is not None:
+                        word = {"start": start, "end": end, "text": text}
+                        if previous_word and same_timed_line(previous_word, word):
+                            continue
+                        previous_word = word
                     start = max(rows[-1]["end"] if rows else offset, offset + float(start or 0))
                     end = offset + min(length, float(end if end is not None else length))
                     if end > start:
+                        if short_lines and rows:
+                            line = rows[-1]
+                            if (
+                                words < 14
+                                and end - line["start"] <= 5
+                                and start - line["end"] < 0.35
+                                and not line["text"].endswith((".", "!", "?", "。", "！", "？"))
+                            ):
+                                separator = " " if raw_text[:1].isspace() else ""
+                                line["text"] += separator + text
+                                line["end"] = end
+                                words += 1
+                                continue
                         rows.append({"start": start, "end": end, "text": text})
+                        words = 1
                 return rows
 
             segments = recognize(samples)
+            if short_lines and any(
+                len(normalized_words(row["text"])) >= 7 and repeated_text(row["text"]) for row in segments
+            ):
+                if on_review:
+                    on_review()
+                reviewed = []
+                for row in segments:
+                    original_words = normalized_words(row["text"])
+                    if len(original_words) < 7 or not repeated_text(row["text"]):
+                        reviewed.append(row)
+                        continue
+                    first, last = round(row["start"] * 16000), round(row["end"] * 16000)
+                    retry_lines = recognize(samples[first:last], first / 16000, retry=True)
+                    retry_text = " ".join(line["text"] for line in retry_lines)
+                    overlap = set(original_words) & set(normalized_words(retry_text))
+                    reviewed.extend(retry_lines if overlap and not repeated_text(retry_text) else [row])
+                segments = reviewed
             if recover_missing:
                 windows = recovery_windows(samples, 16000, segments)
                 if windows and on_recovery:

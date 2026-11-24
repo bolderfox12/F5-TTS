@@ -6670,6 +6670,18 @@
     "HSL Adjust"
   ],
   [
+    "Inverter cores",
+    "Invert"
+  ],
+  [
+    "Fala {value_0} · Personagem {value_1}",
+    "Line {value_0} · Character {value_1}"
+  ],
+  [
+    "Inversão de cores (%)",
+    "Color inversion (%)"
+  ],
+  [
     "Ajuste Lab e inversão de luminosidade",
     "Lab Adjust and Invert Lightness"
   ],
@@ -6680,6 +6692,22 @@
   [
     "Contração e expansão",
     "Pinch and Punch"
+  ],
+  [
+    "Pinch · Contração",
+    "Pinch"
+  ],
+  [
+    "Punch · Expansão",
+    "Punch (Bulge)"
+  ],
+  [
+    "Intensidade da contração (%)",
+    "Pinch strength (%)"
+  ],
+  [
+    "Intensidade da expansão (%)",
+    "Bulge strength (%)"
   ],
   [
     "Redemoinho",

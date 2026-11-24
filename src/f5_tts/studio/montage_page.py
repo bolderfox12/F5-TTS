@@ -16,6 +16,7 @@ from f5_tts.studio.montage import (
     asset_kind,
     audio_tracks,
     duplicate_clip,
+    duplicate_track,
     linked_clips,
     new_audio_track,
     render_montage,
@@ -23,6 +24,7 @@ from f5_tts.studio.montage import (
     separate_video_audio,
     split_at,
     validate_clip,
+    video_tracks,
 )
 from f5_tts.studio.montage_assistant_panel import assistant_dialog
 from f5_tts.studio.montage_fx import FX_CONTROLS, FX_TITLES, GRADIENT_COLORS
@@ -64,6 +66,12 @@ def register_montage_page(service, shell, action):
 
     @ui.page(EDITOR_PATH)
     def editor_page(project_id: str = ""):
+        ui.add_css("""
+            .video-fx-scroll { scrollbar-color: #617e86 #e6eef0; }
+            .video-fx-scroll::-webkit-scrollbar { height: 10px; }
+            .video-fx-scroll::-webkit-scrollbar-track { background: #e6eef0; border-radius: 5px; }
+            .video-fx-scroll::-webkit-scrollbar-thumb { background: #617e86; border-radius: 5px; }
+        """)
         current = None
         selected = None
         playhead = 0
@@ -416,28 +424,20 @@ def register_montage_page(service, shell, action):
             if not current or busy:
                 return
             clips = current["clips"]
-            tracks = audio_tracks(current)
             if "id" in event.args:
                 clip = next((row for row in clips if row["id"] == event.args["id"]), None)
                 if clip is None:
                     return
                 updated, focus = duplicate_clip(clips, clip)
+                candidate = {**current, "clips": updated}
             else:
-                source = event.args.get("track")
-                target = new_audio_track(current) if source in tracks else {"V1": "V2", "V2": "V1"}.get(source)
-                copies = [
-                    {**row, "id": uuid4().hex, "track": target, "link": None}
-                    for row in clips
-                    if target and row["track"] == source
-                ]
-                if not copies:
-                    return ui.notify(t("A faixa selecionada está vazia."), type="warning")
-                if source in tracks:
-                    tracks.append(target)
-                updated, focus = [*clips, *copies], copies[0]["id"]
+                try:
+                    candidate, focus = duplicate_track(current, event.args.get("track"))
+                except ValueError as error:
+                    return ui.notify(t(str(error)), type="warning")
             busy = True
             try:
-                await persist({**current, "clips": updated, "audio_tracks": tracks}, focus)
+                await persist(candidate, focus)
             finally:
                 busy = False
 
@@ -499,6 +499,13 @@ def register_montage_page(service, shell, action):
             if not clip:
                 return ui.notify(t("Selecione um clipe do vídeo principal."), type="warning")
             values = clip.get("video_effects", {})
+            legacy_pinch = values.get("pinch", {})
+            if legacy_pinch.get("amount", 0) < 0 and "punch" not in values:
+                values = {
+                    **values,
+                    "pinch": {**legacy_pinch, "enabled": False, "amount": 0},
+                    "punch": {**legacy_pinch, "amount": -legacy_pinch["amount"]},
+                }
             controls = {}
             enabled = {}
             colors = {}
@@ -514,8 +521,13 @@ def register_montage_page(service, shell, action):
                         ui.label(t("Efeitos de vídeo")).classes("text-xl font-semibold")
                         ui.label(clip["name"]).classes("studio-muted")
                     ui.icon("auto_fix_high", size="28px", color="primary")
-                with ui.tabs().classes("w-full").props("inline-label outside-arrows mobile-arrows") as effects_tabs:
-                    tabs = {key: ui.tab(key, label=t(title)) for key, title in FX_TITLES.items()}
+                with (
+                    ui.element("div")
+                    .classes("video-fx-scroll w-full min-w-0 overflow-x-auto")
+                    .props(f'tabindex="0" role="region" aria-label="{t("Efeitos de vídeo")}"')
+                ):
+                    with ui.tabs().classes("w-max min-w-full").props("inline-label align=left") as effects_tabs:
+                        tabs = {key: ui.tab(key, label=t(title)) for key, title in FX_TITLES.items()}
                 with ui.tab_panels(effects_tabs, value=tabs["hsl"]).classes("w-full"):
                     for effect, parameters in FX_CONTROLS.items():
                         saved = values.get(effect, {})
@@ -562,7 +574,7 @@ def register_montage_page(service, shell, action):
                                             min=minimum,
                                             max=maximum,
                                             step=1,
-                                            value=saved.get(key, default),
+                                            value=min(saved.get(key, default), maximum),
                                             on_change=lambda event, name=effect: enable_when_adjusted(name),
                                         )
                                         .props("label-always")
@@ -764,8 +776,14 @@ def register_montage_page(service, shell, action):
                 ui.label(t("Selecione um clipe na linha do tempo.")).classes("studio-muted")
                 return
             title = ui.input(t("Nome do clipe"), value=clip["name"]).props("outlined dense").classes("w-full")
+            tracks = {
+                "audio": audio_tracks(current),
+                "video": video_tracks(current["clips"]),
+                "caption": TRACKS["caption"],
+                "text": TRACKS["text"],
+            }
             track = ui.select(
-                audio_tracks(current) if clip["kind"] == "audio" else list(TRACKS[clip["kind"]]),
+                list(tracks[clip["kind"]]),
                 value=clip["track"],
                 label=t("Faixa"),
             ).props("outlined dense")

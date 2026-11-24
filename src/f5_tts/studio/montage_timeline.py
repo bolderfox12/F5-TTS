@@ -1,6 +1,7 @@
 """Interactive timeline for the advanced video editor."""
 
 from nicegui.element import Element
+from f5_tts.studio.montage import video_tracks
 
 
 class MontageTimeline(Element, component="montage_timeline.js"):
@@ -68,5 +69,5 @@ class MontageTimeline(Element, component="montage_timeline.js"):
             ],
             selected=selected or "",
             length=max(10, length + 2),
-            tracks=["V1", "V2", *audio_tracks, "TX", "CC"],
+            tracks=[*video_tracks(clips), *audio_tracks, "TX", "CC"],
         )

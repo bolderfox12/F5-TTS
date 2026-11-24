@@ -1,5 +1,6 @@
 """Offline coverage for narration, transcription, translation and real FFmpeg processing."""
 
+import base64
 import json
 import shutil
 import subprocess
@@ -8,6 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import httpx
 import numpy as np
 import soundfile as sf
 import torch
@@ -16,15 +18,16 @@ from f5_tts.audio import save_audio
 from f5_tts.studio import chatterbox_backend as chatterbox
 from f5_tts.studio.local_tools import srt_time
 from f5_tts.studio.service import StudioService
-from f5_tts.studio.video_editor import edit_dubbed_video
-from f5_tts.studio.video_probe import video_duration
 from f5_tts.studio.video_dubbing import (
     GEMINI_TRANSCRIPTION,
+    _assign_speakers,
     analyze_video,
     dub_video,
     speaker_references,
     translate_dialogue,
 )
+from f5_tts.studio.video_editor import edit_dubbed_video
+from f5_tts.studio.video_probe import video_duration
 
 
 class FakeModel:
@@ -112,6 +115,8 @@ class LocalToolsTests(unittest.TestCase):
         self.assertIn("everyone", Path(updated["srt"]).read_text())
         self.assertEqual(Path(updated["txt"]).read_text(), "Hello everyone")
         self.assertFalse(self.service._operation.locked())
+        with self.assertRaises(ValueError):
+            self.service.transcribe_audio(self.reference, model_id="untrusted/model")
 
     def test_trimmed_reference_can_be_transcribed_without_saving_a_transcript(self):
         clipped = self.service.trim_reference(self.reference, 0.25, 1.5)
@@ -216,6 +221,36 @@ class LocalToolsTests(unittest.TestCase):
             self.assertEqual(payload["targetLettersAndNumbers"], 8)
             self.assertEqual(payload["adjacentTranslations"], ["I'm here."])
 
+    @unittest.skipUnless(shutil.which("ffmpeg"), "requires FFmpeg")
+    def test_gemini_translation_can_use_original_audio_and_reviewed_timing(self):
+        source = self.service.uploads / "original.mp4"
+        subprocess.run(
+            ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=duration=2", str(source)],
+            check=True,
+        )
+        rows = [{"start": 0.25, "end": 1.75, "text": "Bom dia", "speaker": 2, "reference": Path("/tmp/ref.wav")}]
+        with patch("f5_tts.studio.script_review.httpx.post") as request:
+            request.return_value.json.return_value = {
+                "candidates": [
+                    {"finishReason": "STOP", "content": {"parts": [{"text": '{"lines":[{"id":0,"text":"Morning"}]}'}]}}
+                ]
+            }
+            self.assertEqual(
+                translate_dialogue(
+                    self.service, rows, "pt", "en", provider="gemini", gemini_key="test-key", timing_source=source
+                ),
+                ["Morning"],
+            )
+        body = request.call_args.kwargs["json"]
+        metadata, audio = body["contents"][0]["parts"]
+        self.assertEqual(
+            json.loads(metadata["text"]),
+            [{"id": 0, "text": "Bom dia", "speaker": 2, "startSeconds": 0.25, "endSeconds": 1.75}],
+        )
+        self.assertEqual(audio["inlineData"]["mimeType"], "audio/mp3")
+        self.assertGreater(len(base64.b64decode(audio["inlineData"]["data"], validate=True)), 100)
+        self.assertIn("internal pauses", body["systemInstruction"]["parts"][0]["text"])
+
     def test_whisper_recovers_missing_speech_at_original_timestamp(self):
         audio = self.service.upload_path("with-gap.wav")
         samples = np.zeros(16000 * 4, dtype="float32")
@@ -239,6 +274,51 @@ class LocalToolsTests(unittest.TestCase):
         self.assertAlmostEqual(rows[1]["start"], 2, delta=0.1)
         self.assertTrue(rows[1]["recovered"])
         self.assertEqual(self.service._asr_factory.call_count, 2)
+        initial, retry = self.service._asr_factory.call_args_list
+        self.assertNotIn("no_speech_threshold", initial.kwargs["generate_kwargs"])
+        self.assertEqual(retry.kwargs["generate_kwargs"]["no_speech_threshold"], 0.8)
+        self.assertEqual(retry.kwargs["generate_kwargs"]["logprob_threshold"], -1.0)
+        self.assertEqual(retry.kwargs["generate_kwargs"]["temperature"], (0.0,))
+
+    def test_dubbing_transcription_groups_words_into_short_lines(self):
+        source = self.service.upload_path("dialogue.wav")
+        sf.write(source, np.zeros(16000 * 9, dtype=np.float32), 16000)
+        chunks = [{"text": f" palavra{i}", "timestamp": (i * 0.4, i * 0.4 + 0.3)} for i in range(18)]
+        self.service._asr_factory = Mock(return_value={"chunks": chunks})
+        rows = self.service._transcribe_audio(
+            str(source), "pt", "openai/whisper-small", save_record=False, return_segments=True, short_lines=True
+        )
+        self.assertEqual(self.service._asr_factory.call_args.kwargs["return_timestamps"], "word")
+        self.assertEqual(" ".join(row["text"] for row in rows).split(), [chunk["text"].strip() for chunk in chunks])
+        self.assertTrue(all(row["end"] - row["start"] <= 5 for row in rows))
+        self.assertGreater(len(rows), 1)
+
+    def test_dubbing_transcription_drops_duplicate_timestamps_and_rechecks_loops(self):
+        source = self.service.upload_path("dialogue.wav")
+        sf.write(source, np.ones(16000 * 5, dtype=np.float32) * 0.02, 16000)
+        chunks = [{"text": " agora", "timestamp": (i * 0.4, i * 0.4 + 0.3)} for i in range(8)]
+        chunks.insert(1, chunks[0])
+        self.service._asr_factory = Mock(
+            side_effect=[
+                {"chunks": chunks},
+                {"chunks": [{"text": " agora", "timestamp": (0.1, 0.4)}]},
+            ]
+        )
+        rows = self.service._transcribe_audio(
+            str(source), "pt", "openai/whisper-small", save_record=False, return_segments=True, short_lines=True
+        )
+        self.assertEqual(rows, [{"start": 0.1, "end": 0.4, "text": "agora"}])
+        self.assertEqual(self.service._asr_factory.call_count, 2)
+
+    def test_dubbing_review_preserves_same_words_spoken_at_different_times(self):
+        from f5_tts.studio.dubbing_transcript import transcript_warnings
+
+        rows = [
+            {"start": 0, "end": 1, "text": "Vou voltar amanhã."},
+            {"start": 0.08, "end": 1.1, "text": "Vou voltar amanhã"},
+            {"start": 4, "end": 5, "text": "Vou voltar amanhã."},
+        ]
+        self.assertEqual(transcript_warnings(rows), ["", "duplicate", ""])
 
     def test_auto_fit_uses_first_alternative_that_actually_fits(self):
         from f5_tts.studio.dubbing_review import DubbingProject, ExportRequest
@@ -290,8 +370,123 @@ class LocalToolsTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.service.transcribe_audio(self.reference)
         self.assertFalse(self.service._operation.locked())
-        with self.assertRaises(ValueError):
-            self.service.transcribe_audio(self.reference, model_id="untrusted/model")
+
+    def test_gemini_tts_keeps_voice_and_direction_in_preview_cache(self):
+        from f5_tts.studio.dubbing_review import DubbingProject, ReviewLine
+        from f5_tts.studio.gemini_tts import MODEL_ID
+
+        source = self.service.uploads / "source.mp4"
+        source.touch()
+        row = {"start": 0, "end": 2, "speaker": 1, "text": "Olá!"}
+        project = DubbingProject(self.service, source, [row], 2)
+        line = ReviewLine(
+            **row,
+            id=next(iter(project.rows)),
+            language="pt",
+            model=MODEL_ID,
+            gemini_voice="Charon",
+            gemini_style="Calmo",
+        )
+
+        def synthesize(text, voice, style, key, destination):
+            sf.write(destination, np.ones(2400, dtype=np.float32) * 0.1, 24000)
+
+        with patch("f5_tts.studio.gemini_tts.synthesize", side_effect=synthesize) as generate:
+            first = project.prepare([line], gemini_key="test-key")
+            self.assertEqual(project.prepare([line], gemini_key="test-key"), first)
+            second = project.prepare([line.model_copy(update={"gemini_style": "Sussurro"})], gemini_key="test-key")
+            self.assertNotEqual(first[0][0], second[0][0])
+            self.assertEqual(
+                [call.args[:3] for call in generate.call_args_list],
+                [
+                    ("Olá!", "Charon", "Calmo"),
+                    ("Olá!", "Charon", "Sussurro"),
+                ],
+            )
+
+    def test_google_cloud_tts_synthesizes_with_project_credentials_and_direction(self):
+        from f5_tts.studio import google_cloud_tts
+        from f5_tts.studio.dubbing_review import DubbingProject, ReviewLine
+
+        source = self.service.uploads / "source.mp4"
+        source.touch()
+        row = {"start": 0, "end": 2, "speaker": 1, "text": "Olá!"}
+        project = DubbingProject(self.service, source, [row], 2)
+        line = ReviewLine(
+            **row,
+            id=next(iter(project.rows)),
+            language="pt",
+            model=google_cloud_tts.MODEL_ID,
+            gemini_voice="Charon",
+            gemini_style="Calmo",
+        )
+        account = Mock()
+        encoded = base64.b64encode(Path(self.reference).read_bytes()).decode("ascii")
+        response = httpx.Response(
+            200,
+            request=httpx.Request("POST", google_cloud_tts.ENDPOINT),
+            json={"audioContent": encoded},
+        )
+        with (
+            patch.object(google_cloud_tts, "credentials", return_value=(account, "test-project")),
+            patch.object(google_cloud_tts.httpx, "post", return_value=response) as post,
+        ):
+            clips = project.prepare([line])
+        path, duration = clips[0]
+        self.assertTrue(path.is_file())
+        self.assertGreater(duration, 0)
+        account.before_request.assert_called_once()
+        self.assertEqual(post.call_args.kwargs["headers"]["x-goog-user-project"], "test-project")
+        self.assertEqual(
+            post.call_args.kwargs["json"],
+            {
+                "input": {"text": "Olá!", "prompt": "Calmo"},
+                "voice": {"name": "Charon", "languageCode": "pt-BR", "modelName": google_cloud_tts.CLOUD_MODEL},
+                "audioConfig": {"audioEncoding": "LINEAR16"},
+            },
+        )
+
+    def test_cloud_dubbing_resumes_after_failure_and_regenerates_a_single_line(self):
+        from f5_tts.studio import google_cloud_tts
+        from f5_tts.studio.dubbing_review import DubbingProject, ReviewLine
+
+        source = self.service.uploads / "source.mp4"
+        source.touch()
+        rows = [
+            {"start": 0, "end": 2, "speaker": 1, "text": "Primeira"},
+            {"start": 2, "end": 4, "speaker": 1, "text": "Segunda"},
+        ]
+        project = DubbingProject(self.service, source, rows, 4)
+        lines = [
+            ReviewLine(id=identifier, model=google_cloud_tts.MODEL_ID, language="pt", **row)
+            for identifier, row in zip(project.rows, rows, strict=True)
+        ]
+
+        def synthesize(text, _language, _voice, _style, _auth, output):
+            if text == "Segunda" and generate.call_count == 2:
+                raise ValueError("Cota excedida")
+            sf.write(output, np.full(2400, generate.call_count / 10, dtype=np.float32), 24000)
+
+        with (
+            patch.object(google_cloud_tts, "credentials", return_value=Mock()),
+            patch.object(google_cloud_tts, "synthesize", side_effect=synthesize) as generate,
+        ):
+            with self.assertRaisesRegex(ValueError, "Cota"):
+                project.prepare(lines)
+            restored = DubbingProject.restore_draft(self.service, source, rows, project.draft_state())
+            first, _ = restored.cloud_voice(lines[0].id, lines[0])
+            self.assertTrue(first[0].is_file())
+            self.assertEqual(restored.cloud_voice(lines[1].id, lines[1]), (None, False))
+            restored.prepare(lines)
+            self.assertEqual([call.args[0] for call in generate.call_args_list], ["Primeira", "Segunda", "Segunda"])
+            original_bytes = first[0].read_bytes()
+            with patch.object(google_cloud_tts, "synthesize", side_effect=ValueError("Cota")):
+                with self.assertRaisesRegex(ValueError, "Cota"):
+                    restored.regenerate(lines[0].id, lines[0])
+            self.assertEqual(first[0].read_bytes(), original_bytes)
+            restored.regenerate(lines[0].id, lines[0])
+            self.assertNotEqual(first[0].read_bytes(), original_bytes)
+            self.assertEqual(generate.call_args.args[0], "Primeira")
 
     @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg required")
     def test_real_ffmpeg_processing_and_mp3_conversion(self):
@@ -306,6 +501,25 @@ class LocalToolsTests(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg is required")
 class VideoDubbingTests(unittest.TestCase):
+    def test_acoustic_profiles_separate_conflicting_voices(self):
+        from f5_tts.studio.vocal_profiles import estimate_profile, keep_distinct_profiles
+
+        with tempfile.TemporaryDirectory() as folder:
+            profiles = []
+            time = np.arange(16000) / 16000
+            for frequency in (110, 220, 170):
+                wav = Path(folder) / f"{frequency}.wav"
+                sf.write(wav, 0.3 * np.sin(2 * np.pi * frequency * time), 16000)
+                profiles.append(estimate_profile(wav))
+        self.assertEqual(profiles, ["masculine", "feminine", "unknown"])
+        self.assertEqual(keep_distinct_profiles([1, 1, 1, 1], [*profiles, "masculine"], [1, 1, 1, 1]), [1, 2, 1, 1])
+
+    def test_known_speaker_count_separates_similar_voices(self):
+        rows = [{"start": index * 3, "end": index * 3 + 2} for index in range(4)]
+        embeddings = [[1, 0], [0.93, 0.36], [1, 0.02], [0.92, 0.39]]
+        self.assertEqual(_assign_speakers(embeddings, rows), [1, 1, 1, 1])
+        self.assertEqual(_assign_speakers(embeddings, rows, 2), [1, 2, 1, 2])
+
     def test_separate_references_and_export_reviewed_dialogue(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -401,21 +615,32 @@ class VideoDubbingTests(unittest.TestCase):
             )
             payload = {
                 "segments": [
-                    {"speaker": 8, "startMs": 0, "endMs": 1000, "text": "Olá"},
-                    {"speaker": 3, "startMs": 1000, "endMs": 2000, "text": "Oi"},
-                    {"speaker": 8, "startMs": 2000, "endMs": 3200, "text": "Tudo bem?"},
+                    {"speaker": 8, "startSeconds": 0, "endSeconds": 1.25, "text": "Olá"},
+                    {"speaker": 3, "startSeconds": 1.25, "endSeconds": 2, "text": "Oi"},
+                    {"speaker": 8, "startSeconds": 2, "endSeconds": 3, "text": "Tudo bem?"},
                 ]
             }
-            with patch("f5_tts.studio.script_review.httpx.post") as request:
+            with (
+                patch("f5_tts.studio.script_review.httpx.post") as request,
+                patch("f5_tts.studio.script_review.time.sleep") as wait,
+            ):
                 request.return_value.json.return_value = {
                     "candidates": [
                         {"finishReason": "STOP", "content": {"parts": [{"text": json.dumps(payload)}]}},
                     ]
                 }
-                rows = analyze_video(studio, source, "pt", GEMINI_TRANSCRIPTION, gemini_key="test-key")
+                request.side_effect = [httpx.Response(503), request.return_value]
+                rows = analyze_video(studio, source, "pt", GEMINI_TRANSCRIPTION, gemini_key="test-key", speaker_count=2)
+                wait.assert_called_once_with(2)
+                self.assertEqual(request.call_count, 2)
             self.assertEqual([row["speaker"] for row in rows], [1, 2, 1])
+            self.assertEqual(rows[1]["start"], 1.25)
             self.assertAlmostEqual(rows[-1]["end"], 3, delta=0.03)
             self.assertTrue(all(row["reference"].is_file() for row in rows))
+            self.assertIn(
+                "expects 2 distinct speaking voices",
+                request.call_args.kwargs["json"]["contents"][0]["parts"][0]["text"],
+            )
             self.assertEqual(
                 request.call_args.kwargs["json"]["contents"][0]["parts"][1]["inlineData"]["mimeType"], "audio/mp3"
             )
@@ -531,8 +756,10 @@ class VideoDubbingTests(unittest.TestCase):
 
     def test_hybrid_export_uses_selected_human_take_and_ai_with_independent_delays(self):
         import asyncio
+
         import httpx
         from fastapi import FastAPI
+
         from f5_tts.studio.dubbing_review import DubbingProject
         from f5_tts.studio.dubbing_review_api import register_dubbing_routes
 

@@ -62,6 +62,32 @@ class StudioTests(unittest.TestCase):
         reopened = StudioService(self.root / "studio", self.root / "data")
         self.assertEqual(reopened.read()["voices"][0]["id"], voice["id"])
 
+    def test_tensorrt_is_opt_in_and_settings_persist(self):
+        settings = self.service.read()["settings"]
+        self.assertFalse(settings.get("tensorrt_enabled", False))
+        self.service.settings("cpu", 32, 1, "fp16", True, "http://localhost:8000", "f5_tts")
+        reopened = StudioService(self.service.home, self.service.data_root)
+        self.assertTrue(reopened.read()["settings"]["tensorrt_enabled"])
+        self.assertEqual(reopened.read()["settings"]["tensorrt_url"], "http://localhost:8000")
+        self.assertEqual(reopened.read()["settings"]["tensorrt_model"], "f5_tts")
+        with self.assertRaisesRegex(ValueError, "http://"):
+            self.service.settings("cpu", 32, 1, "fp16", True, "localhost:8000")
+
+    def test_tensorrt_generation_uses_remote_backend_without_loading_pytorch(self):
+        import f5_tts.studio.tensorrt_backend as trt
+
+        self.service.settings("cpu", 32, 1, "fp16", True, "http://localhost:8000", "f5_tts")
+
+        def fake_synthesize(url, reference, transcript, text, destination, model_name):
+            sf.write(destination, np.ones(2400, dtype=np.float32) * 0.1, 24000)
+            self.assertEqual(transcript, "Reference words")
+            self.assertEqual(text, "Translated words")
+
+        with patch.object(trt, "synthesize", side_effect=fake_synthesize):
+            result = self.service.generate("Translated words", self.reference, "Reference words")
+        self.assertEqual(result["backend"], "TensorRT-LLM")
+        self.assertIsNone(self.service._model)
+
     def test_reference_library_survives_reload_and_keeps_saved_favorites(self):
         recording = self.service.upload_path("microfone.wav")
         shutil.copyfile(self.reference, recording)

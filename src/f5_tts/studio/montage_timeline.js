@@ -17,7 +17,7 @@ export default {
         <div style="width:clamp(83px,13vw,145px);flex:none;background:#1a3541;border-right:1px solid #31505b">
           <div style="height:36px;display:flex;align-items:center;padding-left:10px;color:#bad3d8;font-size:11px">00:00</div>
           <div v-for="track in tracks" :key="track" @contextmenu.prevent="trackMenu(track,$event)" style="height:48px;border-top:1px solid #31505b;display:flex;align-items:center;gap:6px;padding:0 8px;font-size:11px">
-            <strong style="color:#85d7cb">{{ track }}</strong><span>{{ labels[track] || labels.audioTrack }}</span>
+            <strong style="color:#85d7cb">{{ track }}</strong><span>{{ labels[track] || (track.startsWith("V") ? labels.V2 : labels.audioTrack) }}</span>
           </div>
         </div>
         <div ref="scroll" style="overflow-x:auto;min-width:0;flex:1">
@@ -29,7 +29,7 @@ export default {
               <span v-for="tick in ticks" :key="tick" :style="{left: percent(tick)}"
                 style="position:absolute;bottom:0;border-left:1px solid #6a8790;padding:0 0 8px 4px;pointer-events:none">{{ clock(tick,false) }}</span>
             </div>
-            <div v-for="track in tracks" :key="track" @pointerdown.self="seekOnGrid"
+            <div v-for="track in tracks" :key="track" @pointerdown.self="seekOnGrid" @contextmenu.self.prevent="trackMenu(track,$event)"
               :style="{backgroundSize:(tickStep/displayLength*100)+'% 100%'}"
               style="border-top:1px solid #31505b;height:48px;position:relative;background-image:linear-gradient(to right,#34505c 1px,transparent 1px)">
               <button type="button" v-for="clip in clips.filter(row=>row.track===track)" :key="clip.id"
@@ -56,6 +56,8 @@ export default {
           <button type="button" role="menuitem" @click="duplicateMenu" style="padding:8px 12px;width:100%;text-align:left">
             {{ menu.payload.track ? labels.duplicateTrack : labels.duplicate }}
           </button>
+          <button v-if="menu.sourceTrack" type="button" role="menuitem" @click="duplicateSourceTrack"
+            style="padding:8px 12px;width:100%;text-align:left">{{ labels.duplicateTrack }}</button>
           <button v-if="menu.hasAudio" type="button" role="menuitem" @click="audioEffectsMenu"
             style="padding:8px 12px;width:100%;text-align:left">{{ labels.audioEffects }}</button>
           <button v-if="menu.hasVideo" type="button" role="menuitem" @click="videoEffectsMenu"
@@ -113,13 +115,20 @@ export default {
       this.menu=null;
       this.$emit("split",{id:this.selected,position:Number(this.position.toFixed(3))});
     },
-    openMenu(payload,event,hasAudio=false,hasVideo=false,canTransition=false){
-      this.menu={payload,hasAudio,hasVideo,canTransition,x:Math.max(4,Math.min(event.clientX,window.innerWidth-170)),
-        y:Math.max(4,Math.min(event.clientY,window.innerHeight-(canTransition?165:54)))};
+    openMenu(payload,event,hasAudio=false,hasVideo=false,canTransition=false,sourceTrack=null){
+      const height=16+36*(1+[hasAudio,hasVideo,canTransition,sourceTrack].filter(Boolean).length);
+      this.menu={payload,hasAudio,hasVideo,canTransition,sourceTrack,x:Math.max(4,Math.min(event.clientX,window.innerWidth-170)),
+        y:Math.max(4,Math.min(event.clientY,window.innerHeight-height))};
     },
-    clipMenu(clip,event){this.$emit("select-clip",clip.id);this.openMenu({id:clip.id},event,clip.has_audio,clip.track==="V1",clip.has_audio||clip.kind==="video");},
-    trackMenu(track,event){if(["V1","V2"].includes(track)||/^A[1-9][0-9]*$/.test(track))this.openMenu({track},event);},
+    canDuplicateTrack(track){return /^[AV][1-9][0-9]*$/.test(track);},
+    clipMenu(clip,event){
+      this.$emit("select-clip",clip.id);
+      this.openMenu({id:clip.id},event,clip.has_audio,clip.track==="V1",clip.has_audio||clip.kind==="video",
+        this.canDuplicateTrack(clip.track)?clip.track:null);
+    },
+    trackMenu(track,event){if(this.canDuplicateTrack(track))this.openMenu({track},event);},
     duplicateMenu(){if(this.menu)this.$emit("duplicate",this.menu.payload);this.menu=null;},
+    duplicateSourceTrack(){if(this.menu?.sourceTrack)this.$emit("duplicate",{track:this.menu.sourceTrack});this.menu=null;},
     audioEffectsMenu(){if(this.menu?.hasAudio)this.$emit("audio-effects",this.menu.payload.id);this.menu=null;},
     videoEffectsMenu(){if(this.menu?.hasVideo)this.$emit("video-effects",this.menu.payload.id);this.menu=null;},
     transitionsMenu(){if(this.menu?.canTransition)this.$emit("transitions",this.menu.payload.id);this.menu=null;},

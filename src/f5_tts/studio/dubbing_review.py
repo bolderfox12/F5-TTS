@@ -1,10 +1,10 @@
 """Per-project voice previews and stream-copy export for dubbing review."""
 
-import logging
-import os
+import hashlib
+import json
 import shutil
-import subprocess
 import tempfile
+from dataclasses import asdict
 from pathlib import Path
 from threading import Lock
 from uuid import UUID, uuid4
@@ -12,14 +12,16 @@ from uuid import UUID, uuid4
 import soundfile as sf
 from pydantic import BaseModel, Field
 
-from f5_tts.studio import chatterbox_backend as chatterbox
-from f5_tts.studio.adr_audio import HUMAN_TREATMENT, save_take
+from f5_tts.studio import chatterbox_backend as chatterbox, gemini_tts, google_cloud_tts
+from f5_tts.studio.adr_audio import HUMAN_TREATMENT, Take, save_take
+from f5_tts.studio.dubbing_transcript import repeated_text
 from f5_tts.studio.script_review import shorten_dubbing_line
-from f5_tts.studio.video_dubbing import _convert, _publish_video, _tools
+from f5_tts.studio.video_dubbing import _convert, _publish_video, _tools, dubbing_stems
 from f5_tts.studio.video_probe import VIDEO_INPUT, video_media_info
 
 
 MAX_SPEED = 1.30
+GEMINI_VOICE_MODELS = (gemini_tts.MODEL_ID, google_cloud_tts.MODEL_ID)
 
 
 class VoiceRequest(BaseModel):
@@ -28,6 +30,8 @@ class VoiceRequest(BaseModel):
     language: str
     model: str = chatterbox.MODEL_ID
     reference_id: UUID | None = None
+    gemini_voice: str | None = None
+    gemini_style: str = Field(default="", max_length=500)
 
 
 class ReviewLine(VoiceRequest):
@@ -49,29 +53,60 @@ class ExportRequest(BaseModel):
     latency_ms: int = Field(default=0, ge=-300, le=300)
 
 
-def demucs_command(service):
-    configured = os.environ.get("F5_STUDIO_DEMUCS")
-    if configured:
-        return shutil.which(configured)
-    executable = service.home / "demucs" / ".venv" / ("Scripts/demucs.exe" if os.name == "nt" else "bin/demucs")
-    return str(executable) if executable.is_file() else shutil.which("demucs")
-
-
 class DubbingProject:
-    def __init__(self, service, source, segments, duration):
+    def __init__(self, service, source, segments, duration, *, project_id=None):
         self.service = service
         self.source = service.managed_upload(source)
         self.duration = duration
-        self.id = uuid4()
+        self.id = project_id or uuid4()
         self.directory = service.outputs / "dubbing" / self.id.hex
-        self.directory.mkdir(parents=True, exist_ok=False)
+        self.directory.mkdir(parents=True, exist_ok=project_id is not None)
         self.rows = {uuid4(): dict(segment) for segment in segments}
         self._cache = {}
         self._files = {}
+        self._active_cloud_voice = None
+        self.voice_revision = 0
         self._lock = Lock()
         self.takes = {}
         self.active_takes = {}
         self.take_numbers = {}
+
+    def draft_state(self):
+        with self._lock:
+            return {
+                "id": str(self.id),
+                "duration": self.duration,
+                "row_ids": [str(identifier) for identifier in self.rows],
+                "takes": [
+                    {**asdict(take), "segment_id": str(segment_id), "id": str(take.id), "path": str(take.path)}
+                    for segment_id, recordings in self.takes.items()
+                    for take in recordings.values()
+                ],
+                "active_takes": [[str(segment), str(take)] for segment, take in self.active_takes.items()],
+                "take_numbers": [[str(segment), number] for segment, number in self.take_numbers.items()],
+            }
+
+    @classmethod
+    def restore_draft(cls, service, source, rows, state):
+        project = cls(service, source, [], state["duration"], project_id=UUID(state["id"]))
+        for row in rows:
+            if row.get("reference"):
+                row["reference"] = service.managed_upload(row["reference"])
+        project.rows = {UUID(identifier): dict(row) for identifier, row in zip(state["row_ids"], rows, strict=True)}
+        for item in state["takes"]:
+            segment_id, take_id = UUID(item["segment_id"]), UUID(item["id"])
+            path = Path(item["path"]).resolve()
+            if not path.is_relative_to(project.directory.resolve()) or not path.is_file():
+                continue
+            take = Take(take_id, path, item["duration"], item["capture_offset_ms"], item["number"])
+            project.takes.setdefault(segment_id, {})[take_id] = take
+            project._files[path.name] = path
+        for identifier, selected in state["active_takes"]:
+            segment_id, take_id = UUID(identifier), UUID(selected)
+            if take_id in project.takes.get(segment_id, {}):
+                project.active_takes[segment_id] = take_id
+        project.take_numbers = {UUID(identifier): number for identifier, number in state["take_numbers"]}
+        return project
 
     def add_line(self, row):
         with self._lock:
@@ -82,6 +117,15 @@ class DubbingProject:
     def attach_reference(self, segment_id, row):
         with self._lock:
             self.rows[segment_id] = dict(row)
+
+    def remove_line(self, segment_id):
+        with self._lock:
+            if self.takes.get(segment_id):
+                raise ValueError("Remova as gravações desta fala antes de excluí-la.")
+            self.rows.pop(segment_id)
+            self.active_takes.pop(segment_id, None)
+            self.take_numbers.pop(segment_id, None)
+            return True
 
     def store_take(self, segment_id, source, media_type, capture_offset):
         with self._lock:
@@ -133,13 +177,22 @@ class DubbingProject:
     def _request(self, identifier, request):
         if identifier not in self.rows:
             raise ValueError("Esta fala não pertence ao projeto.")
-        if request.language not in chatterbox.LANGUAGES or request.model not in self.service.model_choices():
+        if request.language not in chatterbox.LANGUAGES or (
+            request.model not in GEMINI_VOICE_MODELS and request.model not in self.service.model_choices()
+        ):
             raise ValueError("Escolha um modelo e idioma válidos para a dublagem.")
         if request.model == "original" and request.language not in {"en", "zh"}:
             raise ValueError("O F5-TTS original é para inglês e chinês. Escolha outro modelo para este idioma.")
         text = request.text.strip()
         if not text:
             raise ValueError("Preencha a tradução de todos os trechos antes de dublar.")
+        if request.model in GEMINI_VOICE_MODELS:
+            if request.model == google_cloud_tts.MODEL_ID and request.language not in google_cloud_tts.LOCALES:
+                raise ValueError("Escolha um idioma disponível no Google Cloud Text-to-Speech.")
+            voice = request.gemini_voice or gemini_tts.default_voice(request.speaker)
+            if voice not in gemini_tts.VOICES:
+                raise ValueError("Escolha uma voz Gemini TTS disponível.")
+            return request.model, request.language, text, voice, request.gemini_style.strip()
         reference = self.rows.get(request.reference_id or identifier)
         if reference is None:
             raise ValueError("A referência de voz não pertence ao projeto.")
@@ -155,7 +208,45 @@ class DubbingProject:
             raise ValueError("Selecione uma referência para este personagem.")
         return request.model, request.language, text, path, reference.get("reference_transcript", reference["text"])
 
-    def _voices(self, requests, on_progress=None):
+    def _cloud_voice_path(self, key):
+        digest = hashlib.sha256(json.dumps(key, ensure_ascii=False).encode("utf-8")).hexdigest()
+        return self.directory / f"cloud-{digest}.wav"
+
+    def _load_cloud_voice(self, key):
+        path = self._cloud_voice_path(key)
+        if not path.is_file():
+            return None
+        try:
+            duration = sf.info(path).duration
+        except (OSError, RuntimeError):
+            return None
+        if duration <= 0:
+            return None
+        self._files[path.name] = path
+        return path, duration
+
+    def cloud_voice(self, identifier, request):
+        key = self._request(identifier, request)
+        return self._load_cloud_voice(key), self._active_cloud_voice == key
+
+    def _publish_voice(self, key, output):
+        duration = sf.info(output).duration
+        if duration <= 0:
+            raise ValueError("Um trecho da dublagem foi gerado sem fala audível.")
+        target = self._cloud_voice_path(key) if key[0] in GEMINI_VOICE_MODELS else self.directory / f"{uuid4().hex}.wav"
+        output.replace(target)
+        self._files[target.name] = target
+        self._cache[key] = (target, duration)
+
+    def _voices(self, requests, on_progress=None, *, gemini_key="", force=False):
+        if not force:
+            for key in dict.fromkeys(requests):
+                if key[0] in GEMINI_VOICE_MODELS:
+                    cached = self._load_cloud_voice(key)
+                    if cached:
+                        self._cache[key] = cached
+                    else:
+                        self._cache.pop(key, None)
         pending = [key for key in dict.fromkeys(requests) if key not in self._cache]
         if not pending:
             if on_progress:
@@ -169,16 +260,39 @@ class DubbingProject:
         finished = 0
         report(finished)
         service = self.service
+        models = {key[0] for key in pending}
+        if models.intersection(GEMINI_VOICE_MODELS) and service.read().get("offline"):
+            raise ValueError("O modo offline está ativo. Desative-o para gerar voz na nuvem.")
+        if gemini_tts.MODEL_ID in models:
+            gemini_key = gemini_key.strip() or service.review_api_key("gemini")
+            if not gemini_key:
+                raise ValueError("Informe a chave do Gemini para gerar o áudio.")
         if not service._operation.acquire(blocking=False):
             raise ValueError("Aguarde a operação em execução.")
         try:
+            cloud_auth = google_cloud_tts.credentials(service) if google_cloud_tts.MODEL_ID in models else None
             with tempfile.TemporaryDirectory(prefix="voices-", dir=self.directory) as folder:
                 folder = Path(folder)
                 generated = {}
                 casts = {}
                 for index, key in enumerate(pending):
                     model, language, text, reference, transcript = key
-                    if model == chatterbox.MODEL_ID:
+                    if model in GEMINI_VOICE_MODELS:
+                        output = folder / f"{index}.wav"
+                        self._active_cloud_voice = key
+                        self.voice_revision += 1
+                        try:
+                            if model == google_cloud_tts.MODEL_ID:
+                                google_cloud_tts.synthesize(text, language, reference, transcript, cloud_auth, output)
+                            else:
+                                gemini_tts.synthesize(text, reference, transcript, gemini_key, output)
+                            self._publish_voice(key, output)
+                        finally:
+                            self._active_cloud_voice = None
+                            self.voice_revision += 1
+                        finished += 1
+                        report(finished)
+                    elif model == chatterbox.MODEL_ID:
                         output = folder / f"{index}.wav"
                         casts.setdefault(language, {}).setdefault(reference, []).append((text, output))
                         generated[key] = output
@@ -211,34 +325,28 @@ class DubbingProject:
                         finished += sum(len(lines) for lines in cast.values())
                         report(finished)
                 for key, output in generated.items():
-                    duration = sf.info(output).duration
-                    if duration <= 0:
-                        raise ValueError("Um trecho da dublagem foi gerado sem fala audível.")
-                    target = self.directory / f"{uuid4().hex}.wav"
-                    output.replace(target)
-                    self._files[target.name] = target
-                    self._cache[key] = (target, duration)
+                    self._publish_voice(key, output)
         finally:
             if service.generation_status()["running"]:
                 service.set_generation_status(False, 100, "Geração concluída.")
             service._operation.release()
         return [self._cache[key] for key in requests]
 
-    def regenerate(self, identifier, request, *, on_progress=None):
+    def regenerate(self, identifier, request, *, on_progress=None, gemini_key=""):
         with self._lock:
             key = self._request(identifier, request)
             previous = self._cache.pop(key, None)
             try:
-                return self._voices([key], on_progress)[0]
+                return self._voices([key], on_progress, gemini_key=gemini_key, force=True)[0]
             except Exception:
                 if previous:
                     self._cache[key] = previous
                 raise
 
-    def prepare(self, lines, *, on_progress=None):
+    def prepare(self, lines, *, on_progress=None, gemini_key=""):
         with self._lock:
             keys = [self._request(line.id, line) for line in lines if line.take_id is None]
-            return self._voices(keys, on_progress)
+            return self._voices(keys, on_progress, gemini_key=gemini_key)
 
     def fit_preview(self, request, originals, gemini_key, *, on_progress=None):
         """Keep alternate text only after its synthetic audio fits the video slot."""
@@ -257,7 +365,9 @@ class DubbingProject:
         ordered = sorted(request.lines, key=lambda line: line.start)
         ai_lines = [line for line in ordered if line.take_id is None]
         voices = self.prepare(
-            ai_lines, on_progress=lambda value, message, **values: report(0.05 + 0.25 * value, message, **values)
+            ai_lines,
+            on_progress=lambda value, message, **values: report(0.05 + 0.25 * value, message, **values),
+            gemini_key=key,
         )
         clip_lengths = {line.id: clip[1] for line, clip in zip(ai_lines, voices, strict=True)}
         ceiling = MAX_SPEED if request.auto_speed else 1
@@ -286,7 +396,9 @@ class DubbingProject:
                 gemini_key=key,
                 context=context,
             )
-            candidates[line.id] = [line.model_copy(update={"text": option}) for option in options[:2]]
+            candidates[line.id] = [
+                line.model_copy(update={"text": option}) for option in options if not repeated_text(option)
+            ][:2]
 
         accepted = {}
         for round_index in range(2):
@@ -299,6 +411,7 @@ class DubbingProject:
                 continue
             measured = self.prepare(
                 batch,
+                gemini_key=key,
                 on_progress=lambda value, _message, **_values: report(
                     0.60 + (round_index + value) * 0.18, "Conferindo a duração das falas encurtadas…"
                 ),
@@ -312,14 +425,14 @@ class DubbingProject:
             else request
         )
 
-    def export(self, request, *, preview=False, on_progress=None):
+    def export(self, request, *, preview=False, on_progress=None, gemini_key=""):
         def report(value, message, **values):
             if on_progress:
                 on_progress(value, message, **values)
 
         with self._lock:
             report(0.05, "Conferindo os tempos e o roteiro…")
-            return self._export(request, preview=preview, report=report)
+            return self._export(request, preview=preview, report=report, gemini_key=gemini_key)
 
     def _background(self, ffmpeg, directory):
         output = self.directory / "background.wav"
@@ -330,54 +443,15 @@ class DubbingProject:
             _convert(ffmpeg, "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", self.duration, silence)
             silence.replace(output)
             return output
-        command = demucs_command(self.service)
-        if not command:
-            raise ValueError("Instale o Demucs para preservar música e efeitos ou deixe o fundo em 0%.")
-        weights = self.service.home / "demucs" / "weights"
-        if (
-            self.service.read().get("offline")
-            and not (weights / "hub" / "checkpoints" / "955717e8-8726e21a.th").is_file()
-        ):
-            raise ValueError("Baixe os pesos do Demucs antes de separar o fundo no modo offline.")
-        track = directory / "source.wav"
-        _convert(
-            ffmpeg,
-            *VIDEO_INPUT,
-            "-i",
-            self.source,
-            "-map",
-            "0:a:0",
-            "-af",
-            "aresample=async=1:first_pts=0",
-            "-ar",
-            44100,
-            "-ac",
-            2,
-            track,
-        )
-        try:
-            subprocess.run(
-                [command, "--two-stems", "vocals", "-n", "htdemucs", "-d", "cpu", "-o", str(directory), str(track)],
-                check=True,
-                capture_output=True,
-                timeout=3600,
-                env={**os.environ, "TORCH_HOME": str(weights), "OMP_NUM_THREADS": "4"},
-            )
-            (directory / "htdemucs" / "source" / "no_vocals.wav").replace(output)
-        except (subprocess.SubprocessError, OSError) as error:
-            logging.getLogger(__name__).error("Demucs failed: %s", getattr(error, "stderr", None) or error)
-            raise ValueError(
-                "O Demucs falhou ao separar o áudio de fundo. Confira a instalação e os pesos do modelo."
-            ) from error
-        return output
+        return dubbing_stems(self.service, ffmpeg, self.source)[1]
 
-    def _export(self, request, *, preview, report):
+    def _export(self, request, *, preview, report, gemini_key=""):
         ffmpeg = shutil.which("ffmpeg")
         if not ffmpeg:
             raise ValueError("Instale o FFmpeg para dublar vídeos.")
         identifiers = [line.id for line in request.lines]
-        if len(identifiers) != len(self.rows) or set(identifiers) != self.rows.keys():
-            raise ValueError("Envie uma vez cada fala deste projeto.")
+        if not identifiers or len(set(identifiers)) != len(identifiers) or not set(identifiers) <= self.rows.keys():
+            raise ValueError("Envie falas válidas deste projeto, sem duplicá-las.")
         rows = sorted(request.lines, key=lambda line: line.start)
         cursor = 0
         windows = []
@@ -399,7 +473,11 @@ class DubbingProject:
                     raise ValueError("Take não encontrado nesta fala.")
                 takes[line.id] = take
         ai_voices = iter(
-            self._voices(keys, lambda value, message, **values: report(0.10 + 0.33 * value, message, **values))
+            self._voices(
+                keys,
+                lambda value, message, **values: report(0.10 + 0.33 * value, message, **values),
+                gemini_key=gemini_key,
+            )
         )
         report(0.46, "Sincronizando as falas com o vídeo…")
         captions = []

@@ -1,6 +1,7 @@
 export default {
   props: {
     original: Number, dubbed: Number, originalTracks: Array, dubbedTracks: Array, labels: Object,
+    rangeEnabled: Boolean, rangeStart: Number, rangeEnd: Number,
   },
   template: `
     <section class="full-width" :aria-label="labels.timeline"
@@ -26,6 +27,29 @@ export default {
         <input type="range" :min="0" :max="duration" step="any" :value="position" :aria-label="labels.timeline"
           :aria-valuetext="clock(position)" @input="seek(Number($event.target.value))"
           style="width:100%;margin:0;accent-color:#75ead8;cursor:pointer" />
+        <template v-if="rangeEnabled">
+          <span style="align-self:center;font-size:12px;color:#d1e6ed">{{ labels.dubRange }}</span>
+          <div ref="rangeTrack" @pointerdown="beginRange('selection',$event)"
+            @pointermove="moveRange($event)" @pointerup="endRange($event)" @pointercancel="endRange($event)"
+            style="height:38px;position:relative;min-width:0;cursor:crosshair;touch-action:none;overflow:hidden;
+              border:1px solid #284957;border-radius:6px;background:repeating-linear-gradient(to right,#172f3d 0,#172f3d calc(20% - 1px),#284957 calc(20% - 1px),#284957 20%)">
+            <span :style="{left:percent(activeRangeStart),width:percent(activeRangeEnd-activeRangeStart)}"
+              style="position:absolute;top:4px;bottom:4px;background:#63d9c688;border:1px solid #75ead8;border-radius:4px;box-sizing:border-box;pointer-events:none"></span>
+            <button type="button" :aria-label="labels.dubRange+' · '+clock(activeRangeStart)"
+              @pointerdown.stop="beginRange('start',$event)"
+              :style="{left:percent(activeRangeStart)}"
+              style="position:absolute;top:0;bottom:0;width:14px;transform:translateX(-50%);padding:0;border:0;border-radius:4px;background:#a4efe3;cursor:ew-resize;touch-action:none;z-index:2"></button>
+            <button type="button" :aria-label="labels.dubRange+' · '+clock(activeRangeEnd)"
+              @pointerdown.stop="beginRange('end',$event)"
+              :style="{left:percent(activeRangeEnd)}"
+              style="position:absolute;top:0;bottom:0;width:14px;transform:translateX(-50%);padding:0;border:0;border-radius:4px;background:#a4efe3;cursor:ew-resize;touch-action:none;z-index:2"></button>
+            <span aria-hidden="true" :style="{left:percent(position)}"
+              style="position:absolute;top:0;bottom:0;width:2px;background:#f2fffe;box-shadow:0 0 5px #5aeedb;pointer-events:none;z-index:1"></span>
+          </div>
+          <span style="grid-column:2;color:#a9dee0;font-size:11px">
+            {{ clock(activeRangeStart) }} – {{ clock(activeRangeEnd) }} · {{ labels.rangeHint }}
+          </span>
+        </template>
         <div style="display:grid;gap:5px;grid-column:1/-1;grid-template-columns:subgrid;position:relative">
           <template v-for="track in tracks" :key="track.name">
             <span style="align-self:center;font-size:12px;color:#d1e6ed;overflow-wrap:anywhere">{{ track.name }}</span>
@@ -47,10 +71,17 @@ export default {
   data() {
     return {
       active: this.dubbed ? "dubbed" : "original", duration: 0, position: 0, media: {},
+      rangeDrag: null, draftRangeStart: 0, draftRangeEnd: 0,
       colors: { video: "#63d9c6", voice: "#7ebaf0", captions: "#ffd481", music: "#cbb2f7" },
     };
   },
   computed: {
+    activeRangeStart() {
+      return this.rangeDrag ? this.draftRangeStart : this.rangeStart == null ? 0 : this.rangeStart;
+    },
+    activeRangeEnd() {
+      return this.rangeDrag ? this.draftRangeEnd : this.rangeEnd == null ? this.duration : this.rangeEnd;
+    },
     tracks() {
       const specs = this.active === "dubbed" ? this.dubbedTracks : this.originalTracks;
       return [
@@ -107,6 +138,50 @@ export default {
     seekFromTrack(event) {
       const {left, width} = event.currentTarget.getBoundingClientRect();
       this.seek((event.clientX - left) / width * this.duration);
+    },
+    beginRange(which, event) {
+      if (!this.duration) return;
+      const seconds = this.rangePosition(event);
+      this.draftRangeStart = this.rangeStart == null ? 0 : this.rangeStart;
+      this.draftRangeEnd = this.rangeEnd == null ? this.duration : this.rangeEnd;
+      if (which === "selection") {
+        this.draftRangeStart = seconds;
+        this.draftRangeEnd = seconds;
+      }
+      this.rangeDrag = {which, pointerId:event.pointerId};
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      if (which === "selection") this.updateSelection(seconds);
+    },
+    rangePosition(event) {
+      const {left,width} = this.$refs.rangeTrack.getBoundingClientRect();
+      return Math.max(0,Math.min(this.duration,(event.clientX-left)/width*this.duration));
+    },
+    updateSelection(seconds) {
+      const minimum = Math.min(0.15,this.duration);
+      if (this.rangeDrag.which === "selection") {
+        this.draftRangeEnd = seconds;
+        if (this.draftRangeEnd < this.draftRangeStart) {
+          [this.draftRangeStart,this.draftRangeEnd] = [this.draftRangeEnd,this.draftRangeStart];
+        }
+      } else if (this.rangeDrag.which === "start") {
+        this.draftRangeStart = Math.min(seconds,this.draftRangeEnd-minimum);
+        this.draftRangeStart = Math.max(0,this.draftRangeStart);
+      } else {
+        this.draftRangeEnd = Math.max(seconds,this.draftRangeStart+minimum);
+        this.draftRangeEnd = Math.min(this.duration,this.draftRangeEnd);
+      }
+    },
+    moveRange(event) {
+      if (!this.rangeDrag || event.pointerId !== this.rangeDrag.pointerId) return;
+      this.updateSelection(this.rangePosition(event));
+    },
+    endRange(event) {
+      if (!this.rangeDrag || event.pointerId !== this.rangeDrag.pointerId) return;
+      const {draftRangeStart:start,draftRangeEnd:end} = this;
+      this.rangeDrag = null;
+      if (end-start >= Math.min(0.15,this.duration)) {
+        this.$emit("range-change",{start:Number(start.toFixed(3)),end:Number(end.toFixed(3)),duration:this.duration});
+      }
     },
     percent(seconds) {
       return `${Math.max(0, Math.min(100, seconds / this.duration * 100))}%`;

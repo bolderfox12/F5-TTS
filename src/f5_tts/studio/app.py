@@ -1153,7 +1153,7 @@ def register_pages(service):
                 )
                 ui.label(
                     t(
-                        "CUDA acelera o cálculo. TensorRT é uma otimização de execução e não está integrado a este estúdio."
+                        "CUDA acelera o cálculo. O TensorRT-LLM pode ser ativado abaixo quando houver um servidor Triton configurado."
                     )
                 ).classes("studio-muted")
             with ui.expansion(t("Dicionário de pronúncia"), icon="spellcheck").classes("w-full"):
@@ -1222,6 +1222,51 @@ def register_pages(service):
                         ui.notify(t(str(error)), type="negative")
 
                 ui.button(t("Salvar configurações"), icon="save", on_click=save).props("no-caps")
+            with ui.card().classes("studio-card w-full"):
+                ui.label("TensorRT-LLM (experimental)").classes("font-semibold text-lg")
+                trt_enabled = ui.switch(
+                    "Usar servidor TensorRT-LLM nas novas sínteses do F5-TTS original",
+                    value=settings.get("tensorrt_enabled", False),
+                )
+                trt_url = ui.input(
+                    "Endereço do Triton", value=settings.get("tensorrt_url", "http://localhost:8000")
+                ).props("outlined placeholder=http://localhost:8000")
+                trt_model = ui.input("Nome do modelo Triton", value=settings.get("tensorrt_model", "f5_tts")).props(
+                    "outlined"
+                )
+                ui.label(
+                    "Requer o servidor TensorRT-LLM/Triton e o engine F5-TTS v1 Base preparados separadamente. "
+                    "Desativado, o Studio mantém a síntese PyTorch atual. Modelos salvos, treinados e Chatterbox continuam no motor deles."
+                ).classes("studio-muted text-sm")
+                trt_status = ui.label("").classes("studio-muted text-sm")
+
+                async def check_trt():
+                    try:
+                        await run.io_bound(service.check_tensorrt, trt_url.value)
+                        trt_status.set_text("Triton e modelo prontos.")
+                        trt_status.classes(replace="text-green-700")
+                    except Exception as error:
+                        trt_status.set_text(str(error))
+                        trt_status.classes(replace="text-red-700")
+
+                async def save_trt():
+                    try:
+                        await run.io_bound(
+                            service.settings,
+                            device.value,
+                            steps.value,
+                            speed.value,
+                            precision.value,
+                            trt_enabled.value,
+                            trt_url.value,
+                            (trt_model.value or "f5_tts").strip(),
+                        )
+                        ui.notify("Configuração TensorRT salva.", type="positive")
+                    except Exception as error:
+                        ui.notify(str(error), type="negative")
+
+                ui.button("Testar conexão", icon="lan", on_click=check_trt).props("outline no-caps")
+                ui.button("Salvar TensorRT", icon="save", on_click=save_trt).props("no-caps")
                 ui.label(
                     t(
                         "Para melhorar a naturalidade, priorize referência limpa, textos corretos e ajuste fino revisado. Nenhuma opção garante qualidade superior."
