@@ -615,6 +615,8 @@ def register_video_dubbing_page(service, shell, studio_action):
                         element.set_enabled(not value)
                     review.refresh()
                     if not value:
+                        if operation_cancel.is_set():
+                            status.set_text(t("Processo encerrado. Você pode continuar depois."))
                         save_draft()
 
                 def cancel_operation():
