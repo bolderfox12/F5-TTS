@@ -1201,6 +1201,7 @@ def register_video_dubbing_page(service, shell, studio_action):
                         ui.button(t("Gerar prévias das falas"), icon="record_voice_over", on_click=prepare).props(
                             "outline no-caps"
                         ).set_enabled(not busy)
+                        ui.label(t("Falas já geradas ficam salvas e serão reutilizadas após uma falha ou ao reabrir o rascunho.")).classes("studio-muted")
                     speakers = sorted({row["speaker"] for row in segments})
                     transcript_issues = transcript_warnings(segments)
                     options = {speaker: t("Personagem {value_0}", value_0=speaker) for speaker in speakers}

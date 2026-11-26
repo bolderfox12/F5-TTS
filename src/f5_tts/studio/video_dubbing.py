@@ -518,15 +518,23 @@ def analyze_video(
     except Exception:
         shutil.rmtree(directory)
         raise
-    audio.unlink()
-    (directory / "vozes.json").unlink(missing_ok=True)
     report(0.97, "Preparando os cartões de fala…")
     if not use_whisperx:
         labels = keep_distinct_profiles(labels, profiles, [segment["end"] - segment["start"] for segment in segments])
-    return [
+    output = [
         {**segment, "speaker": label, "reference": sample, "vocal_profile": profile}
         for segment, label, sample, profile in zip(segments, labels, references, profiles, strict=True)
     ]
+    if use_whisperx:
+        from f5_tts.studio.whisperx_diarization import clear_checkpoint
+
+        clear_checkpoint(service.home, analysis_audio, source_language, model_id, speaker_count)
+    for temporary in (audio, directory / "vozes.json"):
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return output
 
 
 def reanalyze_speakers_whisperx(
@@ -584,6 +592,9 @@ def reanalyze_speakers_whisperx(
             manual = bool(row.get("speaker_manual"))
             updates.append({"index": index, "speaker": row.get("speaker") if manual else winner,
                             "overlap": len(set(active)) > 1, "manual": manual})
+        from f5_tts.studio.whisperx_diarization import clear_checkpoint
+
+        clear_checkpoint(service.home, audio, source_language, model_id, speaker_count, diarize_only=True)
         return updates
     finally:
         shutil.rmtree(directory, ignore_errors=True)

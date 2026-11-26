@@ -1,6 +1,7 @@
 """Optional WhisperX runtime isolated from the Studio's torch environment."""
 
 import json
+import hashlib
 import os
 import queue
 import shutil
@@ -31,6 +32,27 @@ def _run_install(command):
         raise ValueError(f"Não foi possível instalar WhisperX: {message[:350]}") from error
 
 
+def _checkpoint_path(home, audio, language, model_id, speaker_count, diarize_only):
+    audio_digest = hashlib.sha256()
+    with Path(audio).open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            audio_digest.update(block)
+    identity = json.dumps(
+        [audio_digest.hexdigest(), language, model_id, bool(diarize_only)], separators=(",", ":")
+    )
+    key = hashlib.sha256(identity.encode()).hexdigest()
+    cache_dir = Path(home) / "outputs" / "whisperx-checkpoints"
+    return cache_dir, cache_dir / f"{key}.json", key
+
+
+def clear_checkpoint(home, audio, language, model_id, speaker_count=None, *, diarize_only=False):
+    try:
+        _, checkpoint, _ = _checkpoint_path(home, audio, language, model_id, speaker_count, diarize_only)
+        checkpoint.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def install(home, report=None):
     uv = shutil.which("uv")
     if not uv:
@@ -55,12 +77,30 @@ def analyze(home, audio, language, model_id, speaker_count=None, token="", repor
     python = python_path(home)
     if not python.is_file():
         raise ValueError("WhisperX não está instalado. Use o botão Instalar WhisperX nesta tela.")
+    cache_dir, checkpoint, cache_key = _checkpoint_path(
+        home, audio, language, model_id, speaker_count, diarize_only
+    )
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        if checkpoint.exists():
+            checkpoint.touch()
+        previous = sorted(cache_dir.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True)
+        for obsolete in previous[20:]:
+            try:
+                obsolete.unlink(missing_ok=True)
+            except OSError:
+                continue
+    except OSError:
+        checkpoint = None
+        cache_key = None
     request = {
         "audio": str(Path(audio).resolve()),
         "language": language,
         "model": "large-v3-turbo" if "turbo" in model_id else "small",
         "speaker_count": speaker_count,
         "diarize_only": diarize_only,
+        "cache_key": cache_key,
+        "checkpoint": str(checkpoint),
     }
     env = os.environ.copy()
     if token:

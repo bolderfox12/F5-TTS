@@ -212,9 +212,13 @@ class DubbingProject:
             raise ValueError("Selecione uma referência para este personagem.")
         return request.model, request.language, text, path, reference.get("reference_transcript", reference["text"])
 
+    def _voice_cache_path(self, key):
+        digest = hashlib.sha256(json.dumps(key, ensure_ascii=False, default=str).encode("utf-8")).hexdigest()
+        prefix = "cloud" if key[0] in GEMINI_VOICE_MODELS else "voice"
+        return self.directory / f"{prefix}-{digest}.wav"
+
     def _cloud_voice_path(self, key):
-        digest = hashlib.sha256(json.dumps(key, ensure_ascii=False).encode("utf-8")).hexdigest()
-        return self.directory / f"cloud-{digest}.wav"
+        return self._voice_cache_path(key)
 
     def _load_cloud_voice(self, key):
         path = self._cloud_voice_path(key)
@@ -237,21 +241,23 @@ class DubbingProject:
         duration = sf.info(output).duration
         if duration <= 0:
             raise ValueError("Um trecho da dublagem foi gerado sem fala audível.")
-        target = self._cloud_voice_path(key) if key[0] in GEMINI_VOICE_MODELS else self.directory / f"{uuid4().hex}.wav"
-        output.replace(target)
+        target = self._voice_cache_path(key)
+        if Path(output) != target:
+            Path(output).replace(target)
         self._files[target.name] = target
         self._cache[key] = (target, duration)
 
     def _voices(self, requests, on_progress=None, *, gemini_key="", force=False):
         if not force:
             for key in dict.fromkeys(requests):
-                if key[0] in GEMINI_VOICE_MODELS:
-                    cached = self._load_cloud_voice(key)
-                    if cached:
-                        self._cache[key] = cached
-                    else:
-                        self._cache.pop(key, None)
+                cached = self._load_cloud_voice(key)
+                if cached:
+                    self._cache[key] = cached
+                else:
+                    self._cache.pop(key, None)
         pending = [key for key in dict.fromkeys(requests) if key not in self._cache]
+        unique_count = len(dict.fromkeys(requests))
+        reused_count = unique_count - len(pending)
         if not pending:
             if on_progress:
                 on_progress(1, "Reutilizando os áudios já gerados…" if requests else "Preparando os takes humanos…")
@@ -259,9 +265,21 @@ class DubbingProject:
 
         def report(done):
             if on_progress:
-                on_progress(done / len(pending), "Áudios gerados: {done} de {total}", done=done, total=len(pending))
+                ready = reused_count + done
+                on_progress(
+                    ready / max(1, unique_count),
+                    "Áudios prontos: {done} de {total}",
+                    done=ready,
+                    total=unique_count,
+                )
 
         finished = 0
+        if reused_count and on_progress:
+            on_progress(
+                reused_count / max(1, unique_count),
+                "Retomando: {done} fala(s) concluída(s) serão reutilizadas.",
+                done=reused_count,
+            )
         report(finished)
         service = self.service
         models = {key[0] for key in pending}
@@ -297,7 +315,8 @@ class DubbingProject:
                         finished += 1
                         report(finished)
                     elif model == chatterbox.MODEL_ID:
-                        output = folder / f"{index}.wav"
+                        output = folder / f"{index}.wav" if force else self._voice_cache_path(key)
+                        output.parent.mkdir(parents=True, exist_ok=True)
                         casts.setdefault(language, {}).setdefault(reference, []).append((text, output))
                         generated[key] = output
                     else:
@@ -311,6 +330,8 @@ class DubbingProject:
                             _part_progress=(index, len(pending)),
                         )
                         generated[key] = Path(entry["path"])
+                        self._publish_voice(key, generated[key])
+                        generated[key] = self._voice_cache_path(key)
                         finished += 1
                         report(finished)
                 if casts:
