@@ -28,5 +28,6 @@ accepted, we will coordinate a fix and disclosure with you. If it is declined,
 we will explain why when possible. We will provide updates as the investigation
 progresses.
 
-If the private reporting link is unavailable, contact the repository
-maintainers privately through GitHub before sharing technical details publicly.
+If the private reporting link is unavailable, open a GitHub issue only to ask
+for a private contact channel. Do not include vulnerability details in that
+issue.
