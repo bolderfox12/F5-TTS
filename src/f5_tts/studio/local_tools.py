@@ -384,7 +384,14 @@ class LocalTools:
         on_recovery=None,
         short_lines=False,
         on_review=None,
+        cancel_event=None,
     ):
+        from f5_tts.studio.chatterbox_backend import SynthesisCancelled
+
+        def check_cancelled():
+            if cancel_event is not None and cancel_event.is_set():
+                raise SynthesisCancelled
+
         if model_id not in ASR_MODELS:
             raise ValueError("Escolha um modelo de transcrição da lista.")
         if language and language not in LANGUAGES:
@@ -392,6 +399,7 @@ class LocalTools:
         if not self._operation.acquire(blocking=False):
             raise ValueError("Aguarde a operação em execução.")
         try:
+            check_cancelled()
             self._release_speech_model()
             asr = getattr(self, "_asr_factory", None)
             if asr is None:
@@ -418,6 +426,7 @@ class LocalTools:
                 raise ValueError("O arquivo não contém áudio suficiente.")
 
             def recognize(audio, offset=0, *, retry=False):
+                check_cancelled()
                 length = len(audio) / 16000
                 options = {"task": "transcribe", **({"language": language} if language else {})}
                 if short_lines:
@@ -437,6 +446,7 @@ class LocalTools:
                     return_timestamps="word" if short_lines else True,
                     generate_kwargs=options,
                 )
+                check_cancelled()
                 chunks = result.get("chunks") or [{"text": result.get("text", ""), "timestamp": (0, length)}]
                 rows = []
                 words = 0
