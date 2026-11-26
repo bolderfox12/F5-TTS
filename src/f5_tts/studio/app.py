@@ -10,6 +10,7 @@ from nicegui import app, run, ui
 from f5_tts.audio import local_audio_input
 from f5_tts.studio import chatterbox_backend as chatterbox
 from f5_tts.studio.ai_console import creative_consoles
+from f5_tts.studio.audio_cleanup_page import register_audio_cleanup_page
 from f5_tts.studio.audio_timeline import AudioTimeline
 from f5_tts.studio.file_pages import register_file_pages
 from f5_tts.studio.gemini_tips import STUDIO_FEATURES, gemini_tips, training_context_json
@@ -19,6 +20,7 @@ from f5_tts.studio.local_pages import register_local_pages
 from f5_tts.studio.microphone import Microphone
 from f5_tts.studio.model_pages import register_model_pages
 from f5_tts.studio.music_preview import music_preview
+from f5_tts.studio.music_library import register_music_library_page
 from f5_tts.studio.montage_page import EDITOR_PATH, register_montage_page, send_to_video_editor
 from f5_tts.studio.reference_turns import reference_turn_editor
 from f5_tts.studio.script_review import local_review_models, preferred_review_model
@@ -99,6 +101,7 @@ def register_pages(service):
                     [
                         ("Dublagem por IA", "movie", "/video-dubbing"),
                         ("Dublagem convencional com humanos", "mic", "/video-dubbing-human"),
+                        ("Limpar áudio do vídeo", "spatial_audio_off", "/audio-cleanup"),
                     ],
                 ),
                 (
@@ -121,6 +124,7 @@ def register_pages(service):
                     [
                         ("Biblioteca de áudios", "folder_managed", "/files"),
                         ("Minhas vozes", "record_voice_over", "/voices"),
+                        ("Músicas de fundo", "music_note", "/music-library"),
                         ("Meus modelos", "inventory_2", "/models"),
                         ("Histórico", "history", "/history"),
                     ],
@@ -211,12 +215,14 @@ def register_pages(service):
 
     register_local_pages(service, shell, action, audio_upload)
     register_video_dubbing_page(service, shell, action)
+    register_audio_cleanup_page(service, shell, action)
     register_montage_page(service, shell, action)
     register_youtube_studio(service, shell, action)
     register_model_pages(service, shell, action)
     register_story_pages(service, shell, action)
     register_training_pages(service, shell, action, audio_upload)
     register_file_pages(service, shell, action)
+    register_music_library_page(service, shell, action)
 
     @ui.page("/")
     def create_audio():

@@ -161,7 +161,7 @@ def edit_dubbed_video(
     if any(path.suffix.lower() not in VIDEO_EXTENSIONS or path.stat().st_size > VIDEO_LIMIT for path in sources):
         raise ValueError("Envie um vídeo MP4, MOV, MKV ou WebM de até 500 MB.")
     if music:
-        music = service.managed_upload(music)
+        music = service._managed_asset(music)
         if music.suffix.lower() not in MUSIC_EXTENSIONS:
             raise ValueError("Escolha um arquivo de música compatível.")
     ffmpeg = shutil.which("ffmpeg")

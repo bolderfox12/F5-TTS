@@ -62,79 +62,36 @@ def _speech_bounds(clip):
 
 def _assemble_track(ffmpeg, segments, clips, directory, duration, *, treat_audio):
     track = directory / "dub.wav"
-    fitted = directory / "fitted.wav"
     aligned = []
-    cursor = 0
-    with wave.open(str(track), "wb") as output:
-        output.setparams((1, 2, DUB_SAMPLE_RATE, 0, "NONE", "not compressed"))
-        for index, (segment, clip) in enumerate(zip(segments, clips, strict=True)):
-            start = max(cursor, round(segment["start"] * DUB_SAMPLE_RATE))
-            end = round(segment["end"] * DUB_SAMPLE_RATE)
-            head, tail = _speech_bounds(clip)
-            speech_duration = tail - head
-            next_start = segments[index + 1]["start"] if index + 1 < len(segments) else duration
-            # Use a short part of the following pause before increasing the speaking rate.
-            original_window = (end - start) / DUB_SAMPLE_RATE
-            if speech_duration > original_window:
-                room = max(0, min(0.28, next_start - segment["end"] - 0.045))
-                added = min(speech_duration - original_window, room)
-                end += round(added * DUB_SAMPLE_RATE)
-            window = (end - start) / DUB_SAMPLE_RATE
-            if window <= 0:
-                raise ValueError("Revise os tempos do roteiro antes de gerar a dublagem.")
-            speed = max(1, speech_duration / window)
-            aligned.append(
-                {
-                    **segment,
-                    "start": start / DUB_SAMPLE_RATE,
-                    "end": end / DUB_SAMPLE_RATE,
-                    "speed": speed,
-                }
-            )
-            filters = [f"atrim=start={head:.8f}:end={tail:.8f}", "asetpts=PTS-STARTPTS"]
-            if treat_audio:
-                filters.extend(("highpass=f=75", "acompressor=threshold=0.125:ratio=2:attack=12:release=120"))
-            # Chain tempo filters to avoid skipping samples at very high speeds.
-            while speed > 2:
-                filters.append("atempo=2")
-                speed /= 2
-            if speed > 1:
-                filters.append(f"atempo={speed:.8f}")
-            fades = min(0.008, window / 4)
-            speech_end = min(window, speech_duration)
-            filters.extend(
-                (
-                    f"afade=t=in:d={fades:.8f}",
-                    f"afade=t=out:st={speech_end - fades:.8f}:d={fades:.8f}",
-                    "apad",
-                )
-            )
-            _convert(
-                ffmpeg,
-                "-i",
-                clip,
-                "-af",
-                ",".join(filters),
-                "-t",
-                window,
-                "-ac",
-                1,
-                "-ar",
-                DUB_SAMPLE_RATE,
-                "-c:a",
-                "pcm_s16le",
-                fitted,
-            )
-            while cursor < start:
-                frames = min(start - cursor, DUB_SAMPLE_RATE)
-                output.writeframesraw(bytes(frames * 2))
-                cursor += frames
-            with wave.open(str(fitted), "rb") as speech:
-                while cursor < end:
-                    frames = min(end - cursor, DUB_SAMPLE_RATE)
-                    samples = speech.readframes(frames)
-                    output.writeframesraw(samples.ljust(frames * 2, b"\0"))
-                    cursor += frames
+    filters, inputs, tracks = [], [], []
+    for index, (segment, clip) in enumerate(zip(segments, clips, strict=True)):
+        start, end = float(segment["start"]), min(float(segment["end"]), duration)
+        window = end - start
+        if start < 0 or window <= 0:
+            raise ValueError("Revise os tempos do roteiro antes de gerar a dublagem.")
+        head, tail = _speech_bounds(clip)
+        speech_duration = tail - head
+        speed = max(1, speech_duration / window)
+        aligned.append({**segment, "start": start, "end": end, "speed": speed})
+        chain = [f"atrim=start={head:.8f}:end={tail:.8f}", "asetpts=PTS-STARTPTS"]
+        if treat_audio:
+            chain.extend(("highpass=f=75", "acompressor=threshold=0.125:ratio=2:attack=12:release=120"))
+        while speed > 2:
+            chain.append("atempo=2")
+            speed /= 2
+        if speed > 1:
+            chain.append(f"atempo={speed:.8f}")
+        fade = min(0.008, window / 4)
+        chain.extend((f"afade=t=in:d={fade:.8f}", f"afade=t=out:st={max(0, window - fade):.8f}:d={fade:.8f}",
+                      f"adelay={round(start * 1000)}:all=1"))
+        inputs.extend(("-i", clip))
+        filters.append(f"[{index}:a]{','.join(chain)}[v{index}]")
+        tracks.append(f"[v{index}]")
+    filters.append(f"{''.join(tracks)}amix=inputs={len(tracks)}:normalize=0:dropout_transition=0,apad[mix]")
+    graph = directory / "dialogue-mix.txt"
+    graph.write_text(";\n".join(filters), encoding="utf-8")
+    _convert(ffmpeg, "-filter_complex_threads", 2, *inputs, "-filter_complex_script", graph, "-map", "[mix]",
+             "-t", duration, "-ac", 1, "-ar", DUB_SAMPLE_RATE, "-c:a", "pcm_s16le", track)
     return track, aligned
 
 
@@ -222,7 +179,10 @@ def _extract_original_audio(ffmpeg, source, audio):
 
 
 def dubbing_stems(service, ffmpeg, source, *, report=None):
-    source = service.managed_upload(source)
+    source = Path(source).resolve()
+    roots = (service.uploads.resolve(), service.outputs.resolve())
+    if not source.is_file() or not any(source.is_relative_to(root) for root in roots):
+        raise ValueError("Escolha um vídeo enviado ou gerado neste Studio.")
     info = source.stat()
     key = hashlib.sha256(f"{source}:{info.st_size}:{info.st_mtime_ns}".encode()).hexdigest()
     cache = service.outputs / "dubbing-stems" / key
@@ -306,6 +266,8 @@ def analyze_video(
     speaker_count=None,
     separate_vocals=False,
     time_range=None,
+    use_whisperx=False,
+    hf_token="",
 ):
     def report(value, message):
         if on_progress:
@@ -340,6 +302,11 @@ def analyze_video(
         if ffmpeg is None:
             raise ValueError("Instale o FFmpeg para dublar vídeos.")
         python = chatterbox.chatterbox_python(service.home) if speaker_count is not None else None
+    elif use_whisperx:
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            raise ValueError("Instale o FFmpeg para dublar vídeos.")
+        python = None
     else:
         ffmpeg, python = _tools(service)
     directory = Path(tempfile.mkdtemp(prefix="dublagem-", dir=service.uploads))
@@ -368,6 +335,7 @@ def analyze_video(
                 16000,
                 analysis_audio,
             )
+        diarization_turns = []
         if use_gemini:
             report(0.30, "Preparando o áudio para o Gemini…")
             compressed = directory / "gemini.mp3"
@@ -406,6 +374,54 @@ def analyze_video(
             compressed.unlink()
             if not segments:
                 raise ValueError("Não foi reconhecida fala. Confira o arquivo e o idioma.")
+        elif use_whisperx:
+            from f5_tts.studio.whisperx_diarization import analyze as analyze_whisperx
+
+            raw = analyze_whisperx(
+                service.home,
+                analysis_audio,
+                source_language,
+                model_id,
+                speaker_count,
+                hf_token,
+                report=lambda value, message: report(0.20 + 0.60 * value, message),
+            )
+            diarization_turns = raw.get("turns", [])
+            words = raw.get("segments", [])
+            words = sorted(words, key=lambda word: (word["start"], word["end"]))
+            labels_by_time = {}
+            rows = []
+            for word in words:
+                label = word.get("speaker")
+                if not label:
+                    continue
+                if label not in labels_by_time:
+                    labels_by_time[label] = len(labels_by_time) + 1
+                word["speaker"] = labels_by_time[label]
+                text = word["text"].strip()
+                if not text:
+                    continue
+                previous = rows[-1] if rows else None
+                join = bool(
+                    previous
+                    and previous["speaker"] == word["speaker"]
+                    and word["start"] - previous["end"] < 0.42
+                    and word["end"] - previous["start"] <= 5.0
+                    and len(previous["text"].split()) < 14
+                    and not previous["text"].endswith((".", "!", "?", "…"))
+                )
+                if join:
+                    previous["text"] += ("" if text[:1] in ",.!?;:" else " ") + text
+                    previous["end"] = max(previous["end"], word["end"])
+                else:
+                    rows.append({"start": word["start"], "end": word["end"], "text": text,
+                                 "speaker": word["speaker"]})
+            segments = []
+            for row in rows:
+                # A little head/tail padding prevents phonemes at word edges being cut.
+                row["start"] = max(0.0, row["start"] - 0.045)
+                row["end"] = row["end"] + 0.11
+                segments.append(row)
         else:
             report(0.36, "Transcrevendo com Whisper…")
             segments = service._transcribe_audio(
@@ -421,6 +437,33 @@ def analyze_video(
             )
         if offset:
             segments = [{**row, "start": row["start"] + offset, "end": row["end"] + offset} for row in segments]
+            diarization_turns = [
+                {**row, "start": row["start"] + offset, "end": row["end"] + offset}
+                for row in diarization_turns
+            ]
+        if use_whisperx:
+            for turn in diarization_turns:
+                label = turn.get("speaker")
+                if label is not None:
+                    if label not in labels_by_time:
+                        labels_by_time[label] = len(labels_by_time) + 1
+                    turn["speaker"] = labels_by_time[label]
+            turns = sorted(diarization_turns, key=lambda row: row["start"])
+            active = []
+            for segment in sorted(segments, key=lambda row: row["start"]):
+                active = [turn for turn in active if turn["end"] > segment["start"]]
+                if segment.get("speaker") is None:
+                    candidates = [turn for turn in turns if turn["start"] <= (segment["start"] + segment["end"]) / 2 <= turn["end"]]
+                    if candidates:
+                        segment["speaker"] = labels_by_time.get(candidates[0]["speaker"], candidates[0]["speaker"])
+                while turns and turns[0]["start"] < segment["end"]:
+                    turn = turns.pop(0)
+                    if turn["end"] > segment["start"]:
+                        active.append(turn)
+                speakers = {turn["speaker"] for turn in active if turn["speaker"] != segment.get("speaker")
+                            and min(turn["end"], segment["end"]) - max(turn["start"], segment["start"]) > 0.08}
+                segment["overlap"] = bool(speakers)
+            segments = [row for row in segments if row.get("speaker") is not None]
         report(0.65, "Conferindo repetições e trechos silenciosos…")
         warnings = transcript_warnings(segments)
         segments = [row for row, warning in zip(segments, warnings, strict=True) if warning != "duplicate"]
@@ -436,11 +479,14 @@ def analyze_video(
         segments = audible
         if not segments:
             raise ValueError("Não foi reconhecida fala no áudio original.")
-        report(0.72, "Extraindo as referências de voz…")
+        report(0.72, "Extraindo referências limpas de voz…")
         references = []
         with wave.open(str(audio), "rb") as speech:
             rate = speech.getframerate()
             for index, segment in enumerate(segments):
+                if segment.get("overlap"):
+                    references.append(None)
+                    continue
                 sample = directory / f"fala-{index + 1}.wav"
                 speech.setpos(round(segment["start"] * rate))
                 length = min(12, segment["end"] - segment["start"])
@@ -450,10 +496,12 @@ def analyze_video(
                     output.writeframes(frames.ljust(rate * speech.getsampwidth(), b"\0"))
                 references.append(sample)
         report(0.82, "Analisando os perfis vocais…")
-        profiles = [estimate_profile(sample) for sample in references]
+        profiles = [estimate_profile(sample) if sample is not None else "unknown" for sample in references]
         if use_gemini:
             labels = [segment["speaker"] for segment in segments]
-        if not use_gemini or (python is not None and python.is_file()):
+        elif use_whisperx:
+            labels = [segment["speaker"] for segment in segments]
+        if not use_whisperx and (not use_gemini or (python is not None and python.is_file())):
             report(0.88, "Identificando personagens pelas vozes…")
             try:
                 embeddings = chatterbox.identify_voices(
@@ -473,11 +521,72 @@ def analyze_video(
     audio.unlink()
     (directory / "vozes.json").unlink(missing_ok=True)
     report(0.97, "Preparando os cartões de fala…")
-    labels = keep_distinct_profiles(labels, profiles, [segment["end"] - segment["start"] for segment in segments])
+    if not use_whisperx:
+        labels = keep_distinct_profiles(labels, profiles, [segment["end"] - segment["start"] for segment in segments])
     return [
         {**segment, "speaker": label, "reference": sample, "vocal_profile": profile}
         for segment, label, sample, profile in zip(segments, labels, references, profiles, strict=True)
     ]
+
+
+def reanalyze_speakers_whisperx(
+    service, source, segments, source_language, model_id, *, speaker_count=None, hf_token="",
+    separate_vocals=False, time_range=None, on_progress=None,
+):
+    """Update speaker labels from diarization only; never transcribes or edits dialogue text."""
+    source = service.managed_upload(source)
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise ValueError("Instale o FFmpeg para analisar as vozes do vídeo.")
+    directory = Path(tempfile.mkdtemp(prefix="diarizacao-", dir=service.uploads))
+    try:
+        audio = directory / "audio.wav"
+        if separate_vocals:
+            vocals, _ = dubbing_stems(service, ffmpeg, source)
+            _convert(ffmpeg, "-i", vocals, "-ac", 1, "-ar", 16000, audio)
+        else:
+            _extract_original_audio(ffmpeg, source, audio)
+        offset = float(time_range[0]) if time_range else 0.0
+        if time_range:
+            selected = directory / "selected.wav"
+            _convert(ffmpeg, "-ss", f"{offset:.6f}", "-i", audio, "-t", f"{float(time_range[1]) - offset:.6f}",
+                     "-ac", 1, "-ar", 16000, selected)
+            audio = selected
+        from f5_tts.studio.whisperx_diarization import analyze as analyze_whisperx
+
+        result = analyze_whisperx(
+            service.home, audio, source_language, model_id, speaker_count, hf_token,
+            report=lambda value, message: on_progress(0.1 + 0.9 * value, message) if on_progress else None,
+            diarize_only=True,
+        )
+        turns = result.get("turns", [])
+        labels = {}
+        for turn in sorted(turns, key=lambda row: row["start"]):
+            raw = turn["speaker"]
+            labels.setdefault(raw, len(labels) + 1)
+            turn["speaker"] = labels[raw]
+            turn["start"] += offset
+            turn["end"] += offset
+        updates = []
+        for index, row in enumerate(segments):
+            if row.get("start") is None or row.get("end") is None:
+                updates.append({"index": index, "speaker": row.get("speaker"), "overlap": row.get("overlap", False), "manual": True})
+                continue
+            coverage = {}
+            active = []
+            for turn in turns:
+                shared = min(row["end"], turn["end"]) - max(row["start"], turn["start"])
+                if shared > 0:
+                    coverage[turn["speaker"]] = coverage.get(turn["speaker"], 0.0) + shared
+                    if shared > 0.08:
+                        active.append(turn["speaker"])
+            winner = max(coverage, key=coverage.get) if coverage else row.get("speaker")
+            manual = bool(row.get("speaker_manual"))
+            updates.append({"index": index, "speaker": row.get("speaker") if manual else winner,
+                            "overlap": len(set(active)) > 1, "manual": manual})
+        return updates
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
 
 
 def speaker_references(segments):
@@ -485,7 +594,11 @@ def speaker_references(segments):
         return row.get("reference_duration") or ((row.get("end") or 0) - (row.get("start") or 0))
 
     references = {}
-    for segment in sorted(segments, key=lambda row: row.get("preferred_reference", False), reverse=True):
+    for segment in sorted(
+        (row for row in segments if not row.get("overlap") and row.get("reference")),
+        key=lambda row: row.get("preferred_reference", False),
+        reverse=True,
+    ):
         speaker = segment["speaker"]
         current = references.get(speaker)
         if current is None or (

@@ -9,8 +9,11 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 from nicegui import ui
 
+from f5_tts.studio.audio_cleanup import audio_cleanup_handoff_url
 from f5_tts.studio.montage import MontageStore
+from f5_tts.studio.music_library import add_music
 from f5_tts.studio.script_review import local_review_models, preferred_review_model, request_text
+from f5_tts.studio.youtube_download import download_youtube_video
 from f5_tts.studio.youtube_research import research_step
 
 
@@ -369,6 +372,122 @@ def register_youtube_studio(service, shell, action):
         with shell("Estúdio YouTube"):
             ui.label(t("Estúdio YouTube")).classes("studio-title")
             ui.label(t("Configure seu canal e reúna pautas com fontes identificadas.")).classes("studio-muted")
+            with ui.card().classes("studio-card w-full gap-4"):
+                ui.label(t("Baixar vídeo do YouTube")).classes("text-lg font-semibold")
+                ui.label(
+                    t("Baixe vídeos públicos que você tem direito de usar e leve-os para a edição local.")
+                ).classes("studio-muted text-sm")
+                download_url = ui.input(
+                    t("Link do vídeo"), placeholder="https://www.youtube.com/watch?v=..."
+                ).props("outlined").classes("w-full")
+                download_mode = ui.radio(
+                    {"video": t("Vídeo"), "mp3": "MP3"}, value="video"
+                ).props("inline")
+                download_resolution = ui.select(
+                    {720: "Até 720p", 1080: "Até 1080p", 2160: "Até 4K"},
+                    value=1080,
+                    label=t("Resolução máxima"),
+                ).props("outlined")
+                download_status = {"percent": 0.0, "message": "", "speed": ""}
+                download_message = ui.label("").classes("studio-muted text-sm")
+                download_progress = ui.linear_progress(value=0).classes("w-full")
+                download_progress.set_visibility(False)
+                download_result = {"path": None, "mode": None}
+                downloaded_video = ui.video("").classes("w-full max-w-3xl aspect-video rounded-lg bg-slate-950")
+                downloaded_video.set_visibility(False)
+                downloaded_audio = ui.audio("").classes("w-full max-w-3xl")
+                downloaded_audio.set_visibility(False)
+
+                def update_download_mode(event):
+                    download_resolution.set_visibility(event.value == "video")
+
+                download_mode.on_value_change(update_download_mode)
+
+                def update_download_progress():
+                    if download_progress.visible:
+                        download_progress.set_value(download_status["percent"])
+                        message = download_status["message"]
+                        speed = download_status["speed"]
+                        download_message.set_text(" · ".join(value for value in (message, speed) if value))
+
+                ui.timer(0.5, update_download_progress)
+
+                async def download_video():
+                    if not download_url.value:
+                        ui.notify(t("Cole o link de um vídeo do YouTube."), type="warning")
+                        return
+                    download_status.update(percent=0.0, message="Iniciando download…", speed="")
+                    download_progress.set_value(0)
+                    download_progress.set_visibility(True)
+                    download_message.set_text(download_status["message"])
+                    download_result["path"] = None
+                    download_result["mode"] = None
+                    download_button.disable()
+                    try:
+                        result = await action(
+                            download_youtube_video,
+                            service,
+                            download_url.value,
+                            download_resolution.value,
+                            download_mode.value,
+                            progress=download_status.update,
+                        )
+                        if result:
+                            if download_mode.value == "mp3":
+                                saved_music = await action(add_music, service, result["path"], result["title"])
+                                if saved_music:
+                                    result["path"] = saved_music["path"]
+                                    result["title"] = saved_music["name"]
+                            download_result["path"] = result["path"]
+                            download_result["mode"] = download_mode.value
+                            if download_mode.value == "mp3":
+                                downloaded_audio.set_source(str(result["path"]))
+                                downloaded_audio.set_visibility(True)
+                                downloaded_video.set_visibility(False)
+                            else:
+                                downloaded_video.set_source(str(result["path"]))
+                                downloaded_video.set_visibility(True)
+                                downloaded_audio.set_visibility(False)
+                            suffix = t(" · salva na biblioteca de músicas") if download_mode.value == "mp3" else ""
+                            download_message.set_text(
+                                t("Download concluído: {value_0}", value_0=result["title"]) + suffix
+                            )
+                            download_progress.set_value(1)
+                        else:
+                            download_message.set_text(t("Download não concluído."))
+                    finally:
+                        download_button.enable()
+                        download_progress.set_visibility(False)
+
+                with ui.row().classes("w-full items-center gap-3"):
+                    download_button = ui.button(
+                        t("Baixar vídeo"), icon="download", on_click=download_video
+                    )
+                    ui.button(
+                        t("Salvar no computador"),
+                        icon="file_download",
+                        on_click=lambda: ui.download.file(download_result["path"])
+                        if download_result["path"]
+                        else None,
+                    ).props("outline")
+                    ui.button(
+                        t("Enviar ao limpar áudio"),
+                        icon="graphic_eq",
+                        on_click=lambda: ui.navigate.to(
+                            audio_cleanup_handoff_url(
+                                service,
+                                music=download_result["path"] if download_result["mode"] == "mp3" else None,
+                                video=download_result["path"] if download_result["mode"] == "video" else None,
+                            )
+                        )
+                        if download_result["path"]
+                        else ui.notify(t("Baixe um arquivo primeiro."), type="warning"),
+                    ).props("outline")
+                    ui.button(
+                        t("Abrir biblioteca de músicas"),
+                        icon="library_music",
+                        on_click=lambda: ui.navigate.to("/music-library"),
+                    ).props("outline")
             with ui.card().classes("studio-card w-full"):
                 ui.label(t("Perfil do canal")).classes("text-lg font-semibold")
                 name = ui.input(t("Nome do canal"), value=(active or {}).get("name", "")).props("outlined")

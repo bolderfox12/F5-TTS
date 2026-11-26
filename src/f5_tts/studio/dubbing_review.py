@@ -16,6 +16,7 @@ from f5_tts.studio import chatterbox_backend as chatterbox, gemini_tts, google_c
 from f5_tts.studio.adr_audio import HUMAN_TREATMENT, Take, save_take
 from f5_tts.studio.dubbing_transcript import repeated_text
 from f5_tts.studio.script_review import shorten_dubbing_line
+from f5_tts.studio.music_library import resolve_music
 from f5_tts.studio.video_dubbing import _convert, _publish_video, _tools, dubbing_stems
 from f5_tts.studio.video_probe import VIDEO_INPUT, video_media_info
 
@@ -46,6 +47,9 @@ class ReviewLine(VoiceRequest):
 class ExportRequest(BaseModel):
     lines: list[ReviewLine] = Field(min_length=1)
     background_volume: int = Field(default=0, ge=0, le=100)
+    background_music_id: str | None = None
+    background_music_volume: int = Field(default=20, ge=0, le=100)
+    auto_duck: bool = True
     voice_volume: int = Field(default=100, ge=0, le=200)
     auto_speed: bool = True
     treat_audio: bool = True
@@ -453,14 +457,12 @@ class DubbingProject:
         if not identifiers or len(set(identifiers)) != len(identifiers) or not set(identifiers) <= self.rows.keys():
             raise ValueError("Envie falas válidas deste projeto, sem duplicá-las.")
         rows = sorted(request.lines, key=lambda line: line.start)
-        cursor = 0
         windows = []
         for line in rows:
             start, end = round(line.start * 1000), min(round(line.end * 1000), round(self.duration * 1000))
-            if start < cursor or end <= start or line.end > self.duration + 0.001:
-                raise ValueError("Ajuste os tempos das falas. Use intervalos válidos e sem sobreposição.")
+            if start < 0 or end <= start or line.end > self.duration + 0.001:
+                raise ValueError("Ajuste o início e o fim de cada fala para dentro do vídeo.")
             windows.append((start, end))
-            cursor = end
         keys = []
         takes = {}
         for line in rows:
@@ -524,9 +526,9 @@ class DubbingProject:
                 chain.extend(("highpass=f=75", "acompressor=threshold=0.125:ratio=2:attack=12:release=120"))
             if request.auto_speed and speed > 1:
                 chain.append(f"atempo={min(speed, MAX_SPEED):.8f}")
-            chain.extend(
-                (f"atrim=duration={length:.3f}", f"volume={request.voice_volume / 100}", f"adelay={start}:all=1")
-            )
+            if not (preview and remaining > 0.001):
+                chain.append(f"atrim=duration={length:.3f}")
+            chain.extend((f"volume={request.voice_volume / 100}", f"adelay={start}:all=1"))
             inputs.extend(("-i", path))
             filters.append(f"[{index}:a]{','.join(chain)}[v{index}]")
             tracks.append(f"[v{index}]")
@@ -542,12 +544,33 @@ class DubbingProject:
 
         with tempfile.TemporaryDirectory(prefix="export-", dir=self.directory) as folder:
             directory = Path(folder)
+            music_path = resolve_music(self.service, request.background_music_id) if request.background_music_id else None
+            voice_tracks = list(tracks)
+            background_track = None
             if request.background_volume:
                 report(0.53, "Separando música e efeitos do áudio original…")
                 background = self._background(ffmpeg, directory)
                 inputs.extend(("-i", background))
-                filters.append(f"[{len(rows)}:a]aresample=48000,volume={request.background_volume / 100}[bg]")
+                background_track = f"[{len(rows)}:a]aresample=48000,volume={request.background_volume / 100}[bg]"
+                filters.append(background_track)
                 tracks.append("[bg]")
+            if music_path:
+                music_index = len(rows) + int(bool(request.background_volume))
+                inputs.extend(("-stream_loop", "-1", "-i", music_path))
+                if request.auto_duck and voice_tracks:
+                    filters.append(
+                        f"{''.join(voice_tracks)}amix=inputs={len(voice_tracks)}:normalize=0:dropout_transition=0[voicebus]"
+                    )
+                    filters.append(
+                        f"[{music_index}:a]aresample=48000,volume={request.background_music_volume / 100:.3f}[music];"
+                        "[music][voicebus]sidechaincompress=threshold=0.015:ratio=8:attack=20:release=450[ducked]"
+                    )
+                    tracks = ["[voicebus]"] + (["[bg]"] if request.background_volume else []) + ["[ducked]"]
+                else:
+                    filters.append(
+                        f"[{music_index}:a]aresample=48000,volume={request.background_music_volume / 100:.3f}[music]"
+                    )
+                    tracks.append("[music]")
             report(0.68, "Mixando voz dublada e fundo…")
             filters.append(
                 f"{''.join(tracks)}amix=inputs={len(tracks)}:normalize=0:dropout_transition=0,"

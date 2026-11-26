@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 from nicegui import app, ui
 
 from f5_tts.studio import chatterbox_backend as chatterbox, gemini_tts, google_cloud_tts
+from f5_tts.studio.audio_cleanup import audio_cleanup_handoff_url
 from f5_tts.studio.adr_panel import take_panel
 from f5_tts.studio.adr_recorder import ADRRecorder
 from f5_tts.studio.demucs_backend import demucs_command
@@ -25,6 +26,7 @@ from f5_tts.studio.dubbing_review_api import register_dubbing_routes
 from f5_tts.studio.dubbing_review_panel import speech_card
 from f5_tts.studio.dubbing_transcript import needs_translation_review, same_timed_line, transcript_warnings
 from f5_tts.studio.local_tools import srt_time
+from f5_tts.studio.music_library import delete_music, list_music
 from f5_tts.studio.montage_page import send_to_video_editor
 from f5_tts.studio.script_review import shorten_dubbing_line
 from f5_tts.studio.video_dubbing import (
@@ -33,9 +35,11 @@ from f5_tts.studio.video_dubbing import (
     VIDEO_LIMIT,
     analyze_video,
     check_vocal_profiles,
+    reanalyze_speakers_whisperx,
     speaker_references,
     translate_dialogue,
 )
+from f5_tts.studio.whisperx_diarization import install as install_whisperx, installed as whisperx_installed
 
 from f5_tts.studio.video_probe import video_duration
 from f5_tts.studio.video_editor_panel import caption_track, original_player, video_editor
@@ -68,6 +72,7 @@ ACTIVITIES = {
     "choose_take": "Seleção de take",
     "forget_take": "Remoção de take",
     "remove_line": "Remoção de fala suspeita",
+    "install": "Instalação do WhisperX",
 }
 
 
@@ -109,6 +114,7 @@ def register_video_dubbing_page(service, shell, studio_action):
         original = None
         source_name = ""
         profile_filter = "all"
+        selected_lines = set()
         last_saved = None
         activity_events = deque(maxlen=1000)
         activity_totals = Counter()
@@ -480,6 +486,54 @@ def register_video_dubbing_page(service, shell, studio_action):
                         label=t("Modelo de transcrição"),
                     ).props("outlined")
 
+                use_whisperx = ui.checkbox(t("Usar diarização WhisperX + pyannote"))
+                use_whisperx.set_visibility(False)
+                ui.label(t("Desmarcado, o Studio continua usando o método de identificação atual.")).classes("studio-muted").bind_visibility_from(use_whisperx, "value", lambda value: not value)
+                hf_token = ui.input(t("Token Hugging Face (opcional se já estiver salvo localmente)"), password=True,
+                                    password_toggle_button=True).props("outlined autocomplete=off").classes("w-full max-w-md")
+                hf_token.set_visibility(False)
+                whisperx_terms = ui.label(t("No Hugging Face, aceite os termos dos modelos pyannote/speaker-diarization-community-1 e pyannote/segmentation-3.0. O token é usado somente nesta execução e não é salvo no projeto.")).classes("studio-muted")
+                whisperx_terms.set_visibility(False)
+                with ui.row().classes("gap-3") as whisperx_links:
+                    ui.link("Modelo de diarização", "https://huggingface.co/pyannote/speaker-diarization-community-1", new_tab=True)
+                    ui.link("Modelo de segmentação", "https://huggingface.co/pyannote/segmentation-3.0", new_tab=True)
+                whisperx_links.set_visibility(False)
+                install_whisperx_button = ui.button(t("Instalar WhisperX + pyannote"), icon="download")
+                install_whisperx_button.set_visibility(False)
+
+                def show_whisperx_options(event=None):
+                    active = bool(use_whisperx.value)
+                    use_whisperx.set_visibility(input_model.value != GEMINI_TRANSCRIPTION)
+                    active = active and input_model.value != GEMINI_TRANSCRIPTION
+                    hf_token.set_visibility(active)
+                    whisperx_terms.set_visibility(active)
+                    whisperx_links.set_visibility(active)
+                    install_whisperx_button.set_visibility(active and not whisperx_installed(service.home))
+
+                use_whisperx.on_value_change(show_whisperx_options)
+                input_model.on_value_change(show_whisperx_options)
+                show_whisperx_options()
+
+                async def setup_whisperx():
+                    if busy:
+                        return
+                    set_busy(True)
+                    begin_progress("Preparando WhisperX em ambiente isolado…")
+                    try:
+                        result = await action(
+                            install_whisperx,
+                            service.home,
+                            report=lambda message: update_progress(0, message),
+                        )
+                        if result:
+                            ui.notify(t("WhisperX instalado no ambiente isolado."), type="positive")
+                            install_whisperx_button.set_visibility(False)
+                    finally:
+                        end_progress()
+                        set_busy(False)
+
+                install_whisperx_button.on_click(setup_whisperx)
+
                 ui.label(t("Ao transcrever com Gemini, o áudio extraído do vídeo é enviado ao Google.")).classes(
                     "studio-muted"
                 ).bind_visibility_from(input_model, "value", lambda value: value == GEMINI_TRANSCRIPTION)
@@ -503,6 +557,9 @@ def register_video_dubbing_page(service, shell, studio_action):
                     new_button.set_enabled(not value and source is not None)
                     origin.set_enabled(not value)
                     input_model.set_enabled(not value)
+                    use_whisperx.set_enabled(not value)
+                    hf_token.set_enabled(not value)
+                    install_whisperx_button.set_enabled(not value)
                     expected_voices.set_enabled(not value)
                     separate_vocals.set_enabled(not value)
                     recover_missing.set_enabled(not value)
@@ -553,6 +610,48 @@ def register_video_dubbing_page(service, shell, studio_action):
                     begin_progress("Transcrevendo e identificando as vozes…")
                     set_busy(True)
                     try:
+                        if (
+                            project is not None
+                            and update_speakers.value
+                            and use_whisperx.value
+                            and not rebuild_lines.value
+                            and input_model.value != GEMINI_TRANSCRIPTION
+                        ):
+                            updates = await action(
+                                reanalyze_speakers_whisperx,
+                                service,
+                                source,
+                                segments,
+                                source_language,
+                                input_model.value,
+                                speaker_count=int(count) if count is not None else None,
+                                hf_token=hf_token.value,
+                                separate_vocals=separate_vocals.value,
+                                time_range=dubbing_range,
+                                on_progress=update_progress,
+                            )
+                            if updates:
+                                for update in updates:
+                                    row = segments[update["index"]]
+                                    row["overlap"] = update["overlap"]
+                                    if update.get("manual"):
+                                        continue
+                                    if row.get("speaker") != update["speaker"]:
+                                        row["speaker"] = update["speaker"]
+                                        row.pop("preferred_reference", None)
+                                        row.pop("reference", None)
+                                        row.pop("reference_duration", None)
+                                        project.attach_reference(list(project.rows)[update["index"]], row)
+                                    if update["overlap"]:
+                                        row.pop("preferred_reference", None)
+                                previews.clear()
+                                shorter_lines.clear()
+                                clear_result()
+                                save_draft()
+                                review.refresh()
+                                ui.notify(t("Personagens atualizados. Texto, tradução, tempos e ajustes manuais foram preservados."), type="positive")
+                            update_speakers.set_value(False)
+                            return
                         found = await action(
                             analyze_video,
                             service,
@@ -565,6 +664,8 @@ def register_video_dubbing_page(service, shell, studio_action):
                             speaker_count=int(count) if count is not None else None,
                             separate_vocals=separate_vocals.value,
                             time_range=dubbing_range,
+                            use_whisperx=use_whisperx.value and input_model.value != GEMINI_TRANSCRIPTION,
+                            hf_token=hf_token.value,
                         )
                         if not found:
                             return
@@ -617,9 +718,10 @@ def register_video_dubbing_page(service, shell, studio_action):
 
                             existing = list(zip(project.rows, segments, strict=True))
                             for identifier, row in existing:
-                                sample = max(recognized, key=lambda candidate: overlap(row, candidate))
-                                shared = overlap(row, sample)
-                                if update_speakers.value and shared > 0:
+                                candidates = [candidate for candidate in recognized if overlap(row, candidate) > 0]
+                                sample = max(candidates, key=lambda candidate: overlap(row, candidate)) if candidates else None
+                                shared = overlap(row, sample) if sample else 0
+                                if update_speakers.value and shared > 0 and not row.get("speaker_manual"):
                                     coverage = Counter()
                                     for candidate in recognized:
                                         coverage[candidate["speaker"]] += max(0, overlap(row, candidate))
@@ -628,6 +730,8 @@ def register_video_dubbing_page(service, shell, studio_action):
                                         if speaker != row["speaker"]:
                                             row["speaker"] = speaker
                                             row.pop("preferred_reference", None)
+                                            row.pop("reference", None)
+                                            row.pop("reference_duration", None)
                                         if not row.get("vocal_profile_manual"):
                                             matching = max(
                                                 (item for item in recognized if item["speaker"] == speaker),
@@ -636,7 +740,9 @@ def register_video_dubbing_page(service, shell, studio_action):
                                             row["vocal_profile"] = matching.get("vocal_profile", "unknown")
                                         if row.get("reference"):
                                             project.attach_reference(identifier, row)
-                                if shared > 0 and not row.get("reference"):
+                                clean_samples = [candidate for candidate in candidates if not candidate.get("overlap")]
+                                if clean_samples and not row.get("reference"):
+                                    sample = max(clean_samples, key=lambda candidate: overlap(row, candidate))
                                     row["reference"] = sample["reference"]
                                     row["reference_duration"] = sample["reference_duration"]
                                     row["reference_transcript"] = sample["text"]
@@ -992,7 +1098,7 @@ def register_video_dubbing_page(service, shell, studio_action):
                     cloud_cards.clear()
                     if not segments or project is None:
                         return
-                    reference_segments = [row for row in segments if row.get("reference")]
+                    reference_segments = [row for row in segments if row.get("reference") and not row.get("overlap")]
                     using_gemini_tts = output_model.value in GEMINI_VOICE_MODELS
                     if not human and reference_segments and not using_gemini_tts:
                         ui.label(t("Referências por personagem")).classes("text-lg font-semibold")
@@ -1086,6 +1192,33 @@ def register_video_dubbing_page(service, shell, studio_action):
                     transcript_issues = transcript_warnings(segments)
                     options = {speaker: t("Personagem {value_0}", value_0=speaker) for speaker in speakers}
                     options[max(speakers) + 1] = t("Novo personagem")
+                    with ui.row().classes("w-full items-center gap-2"):
+                        bulk_speaker = ui.select(options, label=t("Personagem para as falas selecionadas")).props("outlined dense").classes("w-64")
+
+                        def select_all_lines(event):
+                            if event.value:
+                                selected_lines.update(project.rows)
+                            else:
+                                selected_lines.clear()
+                            review.refresh()
+
+                        ui.checkbox(t("Selecionar todas"), on_change=select_all_lines).set_enabled(not busy)
+
+                        def assign_bulk_speaker():
+                            if not selected_lines or bulk_speaker.value is None:
+                                return ui.notify(t("Selecione falas e um personagem."), type="warning")
+                            for identifier, item in zip(project.rows, segments, strict=True):
+                                if identifier in selected_lines:
+                                    item["speaker"] = bulk_speaker.value
+                                    item["speaker_manual"] = True
+                                    item.pop("preferred_reference", None)
+                                    project.attach_reference(identifier, item)
+                            selected_lines.clear()
+                            clear_result()
+                            save_draft()
+                            review.refresh()
+
+                        ui.button(t("Atribuir em lote"), icon="group", on_click=assign_bulk_speaker).props("outline no-caps").set_enabled(not busy)
                     indexed_rows = list(enumerate(zip(project.rows, segments, strict=True)))
                     ordered_rows = sorted(
                         indexed_rows,
@@ -1103,6 +1236,7 @@ def register_video_dubbing_page(service, shell, studio_action):
                                 dialogue[i] = value or ""
                             elif field == "speaker" and value is not None:
                                 item["speaker"] = value
+                                item["speaker_manual"] = True
                                 item.pop("preferred_reference", None)
                                 project.attach_reference(key, item)
                                 clear_result()
@@ -1213,6 +1347,8 @@ def register_video_dubbing_page(service, shell, studio_action):
                             transcript_issue=transcript_issues[index],
                             remove=remove if transcript_issues[index] and not project.takes.get(identifier) else None,
                             include=row.get("include_in_dub", True),
+                            selected=identifier in selected_lines,
+                            select=lambda value, key=identifier: (selected_lines.add(key) if value else selected_lines.discard(key), review.refresh()),
                         )
                         if update_synthesis:
                             cloud_cards[identifier] = (index, transcript_issues[index], update_synthesis)
@@ -1448,6 +1584,9 @@ def register_video_dubbing_page(service, shell, studio_action):
                     return ExportRequest(
                         lines=requested_lines(),
                         background_volume=int(background.value),
+                        background_music_id=background_music.value,
+                        background_music_volume=int(music_volume.value),
+                        auto_duck=auto_duck.value,
                         voice_volume=int(voice_volume.value),
                         auto_speed=auto_speed.value,
                         treat_audio=treat_audio.value,
@@ -1580,6 +1719,13 @@ def register_video_dubbing_page(service, shell, studio_action):
                                     ui.button(t("Baixar vídeo dublado"), on_click=lambda: ui.download.file(video))
                                     ui.button(t("Baixar SRT"), on_click=lambda: ui.download.file(captions))
                                     ui.button(
+                                        t("Enviar para limpar áudio"),
+                                        icon="graphic_eq",
+                                        on_click=lambda path=video: ui.navigate.to(
+                                            audio_cleanup_handoff_url(service, video=path)
+                                        ),
+                                    ).props("outline no-caps")
+                                    ui.button(
                                         t("Enviar ao editor de vídeo"),
                                         icon="video_library",
                                         on_click=lambda: send_to_video_editor(
@@ -1619,6 +1765,30 @@ def register_video_dubbing_page(service, shell, studio_action):
                         )
                     ui.label(t("Voz dublada"))
                     voice_volume = ui.slider(min=0, max=200, value=100).props("label-always")
+                    music_rows = list_music(service)
+                    music_options = {row["id"]: row["name"] for row in music_rows}
+                    background_music = ui.select(
+                        music_options,
+                        value=next(iter(music_options), None),
+                        label=t("Música da biblioteca como fundo"),
+                    ).props("outlined clearable").classes("w-full")
+                    music_volume = ui.slider(min=0, max=100, value=20, step=1).props("label-always")
+                    auto_duck = ui.checkbox(t("Reduzir automaticamente a música durante as falas"), value=True)
+
+                    async def delete_background_music():
+                        if not background_music.value:
+                            return ui.notify(t("Selecione uma música para apagar."), type="warning")
+                        removed = await action(delete_music, service, background_music.value)
+                        if removed:
+                            options = {row["id"]: row["name"] for row in list_music(service)}
+                            background_music.set_options(options, value=next(iter(options), None))
+                            ui.notify(t("Música removida da biblioteca: {value_0}", value_0=removed), type="positive")
+
+                    with ui.row().classes("w-full gap-2"):
+                        ui.button(t("Apagar música selecionada"), icon="delete", on_click=delete_background_music).props(
+                            "flat no-caps color=negative"
+                        )
+                        ui.button(t("Gerenciar biblioteca"), icon="library_music", on_click=lambda: ui.navigate.to("/music-library")).props("flat")
                     auto_speed = ui.checkbox(
                         t("Ajustar velocidade automaticamente para caber no tempo da fala"), value=True
                     )
@@ -1667,6 +1837,7 @@ def register_video_dubbing_page(service, shell, studio_action):
             draft_settings = {
                 "origin": origin,
                 "input_model": input_model,
+                "use_whisperx": use_whisperx,
                 "expected_voices": expected_voices,
                 "recover_missing": recover_missing,
                 "separate_vocals": separate_vocals,
@@ -1683,6 +1854,7 @@ def register_video_dubbing_page(service, shell, studio_action):
                 "latency": latency,
             }
             restore_draft()
+            show_whisperx_options()
             for control in draft_settings.values():
                 control.on_value_change(lambda: save_draft())
             switch_mode(initial_human)

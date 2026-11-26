@@ -1199,7 +1199,9 @@ class StudioService(StoryTools, LocalTools):
             if path.suffix.lower() not in allowed_suffixes:
                 continue
             roles = uses.get(str(path.resolve()), [])
-            if any(role.startswith("Voz:") for role in roles):
+            if path.parent.name == "music-library":
+                category = "Música de fundo"
+            elif any(role.startswith("Voz:") for role in roles):
                 category = "Referência salva"
             elif any(role.startswith("Histórico:") for role in roles):
                 category = "Áudio gerado"
@@ -1481,6 +1483,11 @@ class StudioService(StoryTools, LocalTools):
                     for record in data.get("transcripts", [])
                     if not any(matches(record.get(field)) for field in ("path", "audio", "txt", "srt"))
                 ]
+                for project in data.get("video_projects", []):
+                    kept = [clip for clip in project.get("clips", []) if not matches(clip.get("path"))]
+                    if len(kept) != len(project.get("clips", [])):
+                        project["clips"] = kept
+                        project["revision"] = int(project.get("revision", 0)) + 1
                 self.write(data)
             external_assets = {str(Path(item).resolve()) for item in data.get("external_assets", [])}
             if target in external_assets:

@@ -235,7 +235,8 @@ def validate_clip(clip):
     start, first, last, duration = (clip[key] for key in ("start", "in", "out", "duration"))
     if not all(isinstance(value, (float, int)) and math.isfinite(value) for value in (start, first, last, duration)):
         raise ValueError("Informe tempos válidos para o clipe.")
-    if start < 0 or first < 0 or last - first < 0.01 or last > duration + 0.0005:
+    looping_music = clip.get("loop_music") is True and clip.get("kind") == "audio"
+    if start < 0 or first < 0 or last - first < 0.01 or (last > duration + 0.0005 and not looping_music):
         raise ValueError("O corte precisa estar dentro da duração do clipe.")
     kind = clip["kind"]
     if kind in ("audio", "video"):
@@ -397,7 +398,8 @@ def render_montage(service, project, *, preview=False):
                 raise ValueError("O formato do clipe não corresponde à faixa.")
             source_options = VIDEO_INPUT if source_kind == "video" else MUSIC_INPUT
             trim = clip["out"] - clip["in"]
-            inputs.extend((*source_options, "-ss", clip["in"], "-t", trim, "-i", path))
+            loop_options = ("-stream_loop", "-1") if clip.get("loop_music") else ()
+            inputs.extend((*loop_options, *source_options, "-ss", clip["in"], "-t", trim, "-i", path))
             if clip["kind"] == "video":
                 video_layers.append((index, clip))
             if clip["has_audio"] and clip["volume"]:

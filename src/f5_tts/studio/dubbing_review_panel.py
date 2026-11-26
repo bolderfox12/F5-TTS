@@ -28,6 +28,8 @@ def speech_card(
     transcript_issue="",
     remove=None,
     include=True,
+    selected=False,
+    select=None,
 ):
     with ui.card().classes("studio-card w-full p-4 gap-3") as card:
         badge = ui.badge().props("outline")
@@ -57,6 +59,9 @@ def speech_card(
             js_handler="(event, emit) => { if (!event.target.closest('button,input,textarea,label,audio,[role=combobox]')) emit(); }",
         )
         with ui.row().classes("w-full items-center"):
+            if select:
+                ui.checkbox(t("Selecionar para atribuição em lote"), value=selected,
+                            on_change=lambda event: select(event.value)).set_enabled(not busy)
             ui.checkbox(
                 t("Incluir na dublagem"),
                 value=include,
@@ -76,6 +81,8 @@ def speech_card(
                     "nearby": "Revisar fala repetida no trecho vizinho",
                 }
                 ui.badge(t(issue_labels[transcript_issue]), color="deep-orange-9")
+            if row.get("overlap"):
+                ui.badge(t("Sobreposição · referência excluída"), color="amber-9", text_color="black")
             checked = profile_check_status(row)
             if checked == "mismatch":
                 detected = t(PROFILE_LABELS[row["vocal_check"]["profile"]])

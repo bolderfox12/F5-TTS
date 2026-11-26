@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from nicegui import ui
 
+from f5_tts.studio.audio_cleanup import audio_cleanup_handoff_url
 from f5_tts.studio.local_tools import subtitles
 from f5_tts.studio.montage import (
     EQ_BANDS,
@@ -94,9 +95,14 @@ def register_montage_page(service, shell, action):
                 player.pause()
                 return
             player.set_source(video)
-            if captions:
-                with result:
-                    ui.button(t("Baixar MP4"), icon="download", on_click=lambda: ui.download.file(video))
+            with result:
+                ui.button(t("Baixar MP4"), icon="download", on_click=lambda path=video: ui.download.file(path))
+                ui.button(
+                    t("Enviar para limpar áudio"),
+                    icon="graphic_eq",
+                    on_click=lambda path=video: ui.navigate.to(audio_cleanup_handoff_url(service, video=path)),
+                ).props("outline")
+                if captions:
                     ui.button(t("Baixar SRT"), icon="subtitles", on_click=lambda: ui.download.file(captions))
 
         def seek_new_preview():
@@ -416,6 +422,39 @@ def register_montage_page(service, shell, action):
                     await persist(
                         {**project, "audio_tracks": [*audio_tracks(project), new_audio_track(project)]}, selected
                     )
+            finally:
+                busy = False
+
+        async def add_background_music():
+            nonlocal busy
+            if busy or not current or not assets.value:
+                return
+            try:
+                clip = await action(store.clip, assets.value, asset_label(assets.value), 0)
+                if not clip or clip["kind"] != "audio":
+                    return ui.notify(t("Selecione uma música na biblioteca."), type="warning")
+                video_end = max(
+                    (row["start"] + row["out"] - row["in"] for row in current["clips"] if row["kind"] == "video"),
+                    default=0,
+                )
+                target_duration = video_end or sequence_duration(current["clips"]) or clip["duration"]
+                target_track = new_audio_track(current)
+                updated = {
+                    **clip,
+                    "track": target_track,
+                    "start": 0,
+                    "in": 0,
+                    "out": target_duration,
+                    "loop_music": True,
+                    "volume": 20,
+                }
+                project = {**current, "audio_tracks": [*audio_tracks(current), target_track]}
+                validate_clip(updated)
+            except (KeyError, ValueError) as error:
+                return ui.notify(t(str(error)), type="warning")
+            busy = True
+            try:
+                await persist({**project, "clips": [*project["clips"], updated]}, updated["id"])
             finally:
                 busy = False
 
@@ -906,6 +945,7 @@ def register_montage_page(service, shell, action):
                     )
                     category.on_value_change(library_options)
                     ui.button(t("Adicionar no cursor"), icon="add", on_click=add_selected)
+                    ui.button(t("Adicionar música como fundo · 20%"), icon="music_note", on_click=add_background_music).props("outline")
                     ui.button(t("Prévia do arquivo"), icon="play_circle", on_click=inspect_asset).props("flat")
                     ui.button(t("Adicionar legenda"), icon="subtitles", on_click=add_caption).props("outline")
                     ui.button(t("Adicionar texto"), icon="title", on_click=add_title).props("outline")

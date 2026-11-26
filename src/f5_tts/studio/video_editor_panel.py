@@ -5,7 +5,9 @@ from uuid import uuid4
 
 from nicegui import ui
 
+from f5_tts.studio.audio_cleanup import audio_cleanup_handoff_url
 from f5_tts.studio.local_tools import srt_time
+from f5_tts.studio.music_library import delete_music, list_music, resolve_music
 from f5_tts.studio.montage_page import send_to_video_editor
 from f5_tts.studio.video_dubbing import VIDEO_EXTENSIONS, VIDEO_LIMIT
 from f5_tts.studio.video_editor import (
@@ -87,6 +89,11 @@ def video_editor(
         with ui.row() as downloads:
             ui.button(t("Baixar MP4"), icon="download", on_click=lambda: ui.download.file(current[0]))
             ui.button(t("Baixar SRT"), icon="subtitles", on_click=lambda: ui.download.file(current[1]))
+            ui.button(
+                t("Enviar para limpar áudio"),
+                icon="graphic_eq",
+                on_click=lambda: ui.navigate.to(audio_cleanup_handoff_url(service, video=current[0])),
+            ).props("outline")
 
         def send_montage():
             selected_video, selected_captions = current
@@ -232,6 +239,38 @@ def video_editor(
 
             with ui.expansion(t("Música de fundo"), icon="music_note").classes("w-full"):
 
+                def refresh_music_library(selected=None):
+                    nonlocal music
+                    rows = list_music(service)
+                    options = {row["id"]: row["name"] for row in rows}
+                    choice = selected if selected in options else (next(iter(options), None))
+                    music_select.set_options(options, value=choice)
+                    if choice:
+                        music = resolve_music(service, choice)
+                        music_name.set_text(options[choice])
+                    else:
+                        music = None
+                        music_name.set_text("")
+
+                def select_library_music(event):
+                    nonlocal music
+                    music = resolve_music(service, event.value) if event.value else None
+                    music_name.set_text(music.name[33:] if music else "")
+
+                async def delete_selected_music():
+                    identifier = music_select.value
+                    if not identifier:
+                        return
+                    removed = await action(delete_music, service, identifier)
+                    if removed:
+                        refresh_music_library()
+                        ui.notify(t("Música removida da biblioteca: {value_0}", value_0=removed), type="positive")
+
+                music_select = ui.select({}, label=t("Música salva na biblioteca")).props("outlined").classes("w-full")
+                music_select.on_value_change(select_library_music)
+                music_name = ui.label("").classes("studio-muted")
+                refresh_music_library()
+
                 async def add_music(event):
                     nonlocal music
                     if is_busy():
@@ -267,11 +306,14 @@ def video_editor(
                     .classes("w-full")
                 )
                 with ui.row().classes("items-center"):
-                    music_name = ui.label("")
                     music_volume = ui.number(t("Volume da música (%)"), value=20, min=0, max=100, step=1).props(
                         "outlined"
                     )
                     ui.button(t("Retirar música"), icon="close", on_click=remove_music).props("flat")
+                    ui.button(t("Apagar música selecionada"), icon="delete", on_click=delete_selected_music).props(
+                        "flat no-caps color=negative"
+                    )
+                    ui.button(t("Abrir biblioteca"), icon="library_music", on_click=lambda: ui.navigate.to("/music-library")).props("flat")
 
             with ui.expansion(t("Editar legendas"), icon="subtitles").classes("w-full"):
                 ui.label(
