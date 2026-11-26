@@ -1,6 +1,7 @@
 """Review the cast and transcript before generating a dubbed video."""
 
 import json
+import re
 from collections import Counter, deque
 from datetime import datetime
 from pathlib import Path
@@ -74,6 +75,16 @@ ACTIVITIES = {
     "remove_line": "Remoção de fala suspeita",
     "install": "Instalação do WhisperX",
 }
+
+
+def _safe_error_detail(error):
+    detail = str(error)
+    detail = re.sub(r"AIza[0-9A-Za-z_-]{30,}", "[chave removida]", detail)
+    detail = re.sub(r"\bhf_[A-Za-z0-9]{20,}\b", "[token removido]", detail)
+    detail = re.sub(r"\b(?:sk|rk)-[A-Za-z0-9_-]{20,}\b", "[chave removida]", detail)
+    detail = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._~-]+", r"\1[token removido]", detail)
+    detail = re.sub(r"(?i)([?&](?:key|token|access_token)=)[^&\s]+", r"\1[removido]", detail)
+    return detail[:500]
 
 
 def register_video_dubbing_page(service, shell, studio_action):
@@ -161,7 +172,9 @@ def register_video_dubbing_page(service, shell, studio_action):
                         output = fn(*args, **kwargs)
                     except Exception as error:
                         if label:
-                            record_activity(f"{t(label)} · {t('Falhou')} ({type(error).__name__})")
+                            record_activity(
+                                f"{t(label)} · {t('Falhou')} ({type(error).__name__}): {_safe_error_detail(error)}"
+                            )
                         raise
                 if label:
                     record_activity(f"{t(label)} · {t('Concluída')} · {perf_counter() - started:.2f} s")

@@ -28,6 +28,7 @@ def main():
                 pass
         if not token:
             raise ValueError("Informe um token Hugging Face e aceite os termos de acesso dos modelos pyannote de diarização e segmentation-3.0.")
+        audio = whisperx.load_audio(request["audio"])
         if not request.get("diarize_only"):
             emit(0.05, f"Carregando WhisperX em {device.upper()}…")
             model = whisperx.load_model(request["model"], device, compute_type=compute_type)
@@ -39,7 +40,6 @@ def main():
         diarizer = DiarizationPipeline(token=token, device=device)
         kwargs = {"num_speakers": request["speaker_count"]} if request.get("speaker_count") else {}
         # Feed decoded samples so pyannote does not need torchcodec's FFmpeg shared libraries.
-        audio = whisperx.load_audio(request["audio"])
         turns = diarizer(
             audio,
             **kwargs,
