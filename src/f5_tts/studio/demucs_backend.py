@@ -33,7 +33,13 @@ def _device(command):
     return device if device in ("cpu", "cuda") else "auto"
 
 
-def separate_track(service, track, directory, *, report=None):
+def separate_track(service, track, directory, *, report=None, cancel_event=None):
+    from f5_tts.studio.chatterbox_backend import SynthesisCancelled
+
+    def check_cancelled():
+        if cancel_event is not None and cancel_event.is_set():
+            raise SynthesisCancelled
+
     command = demucs_command(service)
     if not command:
         raise ValueError("Instale o Demucs para separar a voz da música e dos efeitos.")
@@ -48,7 +54,24 @@ def separate_track(service, track, directory, *, report=None):
 
     def run(selected):
         options = ["-d", selected] if selected != "auto" else []
-        subprocess.run([*args, *options, str(track)], check=True, capture_output=True, text=True, timeout=3600, env=env)
+        command_line = [*args, *options, str(track)]
+        if cancel_event is None:
+            subprocess.run(command_line, check=True, capture_output=True, text=True, timeout=3600, env=env)
+            return
+        process = subprocess.Popen(command_line, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        while True:
+            check_cancelled()
+            try:
+                _, stderr = process.communicate(timeout=0.25)
+                if process.returncode:
+                    raise subprocess.CalledProcessError(process.returncode, command_line, stderr=stderr)
+                return
+            except subprocess.TimeoutExpired:
+                continue
+            except SynthesisCancelled:
+                process.kill()
+                process.communicate()
+                raise
 
     if report:
         messages = {
@@ -57,6 +80,7 @@ def separate_track(service, track, directory, *, report=None):
             "auto": "Separando voz e fundo com Demucs…",
         }
         report(0.10, messages[device])
+    check_cancelled()
     try:
         try:
             run(device)
@@ -72,6 +96,8 @@ def separate_track(service, track, directory, *, report=None):
         vocals, background = stems / "vocals.wav", stems / "no_vocals.wav"
         if not (vocals.is_file() and background.is_file()):
             raise FileNotFoundError("Demucs did not produce both stems")
+    except SynthesisCancelled:
+        raise
     except (subprocess.SubprocessError, OSError) as error:
         logging.getLogger(__name__).error("Demucs failed: %s", getattr(error, "stderr", None) or error)
         raise ValueError(

@@ -2,6 +2,7 @@
 
 import json
 import re
+import threading
 from collections import Counter, deque
 from datetime import datetime
 from pathlib import Path
@@ -113,6 +114,8 @@ def register_video_dubbing_page(service, shell, studio_action):
         dubbing_range = None
         analyzed_language = None
         busy = False
+        operation_cancel = threading.Event()
+        cancel_button = None
         translation_key = None
         dialogue = []
         original_timeline = None
@@ -170,6 +173,9 @@ def register_video_dubbing_page(service, shell, studio_action):
                 with observe_requests(record_activity):
                     try:
                         output = fn(*args, **kwargs)
+                    except chatterbox.SynthesisCancelled:
+                        record_activity((t(label) + " · Cancelada") if label else t("Processo cancelado pelo usuário."))
+                        return None
                     except Exception as error:
                         if label:
                             record_activity(
@@ -537,6 +543,7 @@ def register_video_dubbing_page(service, shell, studio_action):
                             install_whisperx,
                             service.home,
                             report=lambda message: update_progress(0, message),
+                            cancel_event=operation_cancel,
                         )
                         if result:
                             ui.notify(t("WhisperX instalado no ambiente isolado."), type="positive")
@@ -565,6 +572,11 @@ def register_video_dubbing_page(service, shell, studio_action):
                 def set_busy(value):
                     nonlocal busy
                     busy = value
+                    if value:
+                        operation_cancel.clear()
+                    if cancel_button is not None:
+                        cancel_button.set_visibility(value)
+                        cancel_button.set_enabled(value)
                     uploader.set_enabled(not value and source is None)
                     save_button.set_enabled(not value and source is not None)
                     new_button.set_enabled(not value and source is not None)
@@ -605,6 +617,15 @@ def register_video_dubbing_page(service, shell, studio_action):
                     if not value:
                         save_draft()
 
+                def cancel_operation():
+                    if not busy:
+                        return
+                    operation_cancel.set()
+                    if cancel_button is not None:
+                        cancel_button.set_enabled(False)
+                    record_activity(t("Cancelamento solicitado; encerrando o processo em andamento…"))
+                    status.set_text(t("Cancelando o processo atual…"))
+
                 async def transcribe():
                     nonlocal analyzed_language, project
                     if busy or source is None:
@@ -642,6 +663,7 @@ def register_video_dubbing_page(service, shell, studio_action):
                                 separate_vocals=separate_vocals.value,
                                 time_range=dubbing_range,
                                 on_progress=update_progress,
+                                cancel_event=operation_cancel,
                             )
                             if updates:
                                 for update in updates:
@@ -679,6 +701,7 @@ def register_video_dubbing_page(service, shell, studio_action):
                             time_range=dubbing_range,
                             use_whisperx=use_whisperx.value and input_model.value != GEMINI_TRANSCRIPTION,
                             hf_token=hf_token.value,
+                            cancel_event=operation_cancel,
                         )
                         if not found:
                             return
@@ -1041,6 +1064,7 @@ def register_video_dubbing_page(service, shell, studio_action):
                             source,
                             [dict(row) for row in segments],
                             on_progress=update_progress,
+                            cancel_event=operation_cancel,
                         )
                         if checks is not None:
                             for row, check in zip(segments, checks, strict=True):
@@ -1520,6 +1544,7 @@ def register_video_dubbing_page(service, shell, studio_action):
                             request,
                             gemini_key=gemini_key.value,
                             on_progress=update_progress,
+                            cancel_event=operation_cancel,
                         )
                         if generated:
                             previews[identifier] = (payload, generated)
@@ -1546,7 +1571,8 @@ def register_video_dubbing_page(service, shell, studio_action):
                     set_busy(True)
                     try:
                         generated = await action(
-                            project.prepare, lines, gemini_key=gemini_key.value, on_progress=update_progress
+                            project.prepare, lines, gemini_key=gemini_key.value,
+                            on_progress=update_progress, cancel_event=operation_cancel
                         )
                         if generated:
                             remember_previews(lines, generated)
@@ -1622,6 +1648,7 @@ def register_video_dubbing_page(service, shell, studio_action):
                         originals,
                         gemini_key.value,
                         on_progress=lambda value, message, **values: update_progress(value * 0.7, message, **values),
+                        cancel_event=operation_cancel,
                     )
 
                 async def keep_adjustments(before, after):
@@ -1667,6 +1694,7 @@ def register_video_dubbing_page(service, shell, studio_action):
                             preview=preview,
                             gemini_key=gemini_key.value,
                             on_progress=render_progress,
+                            cancel_event=operation_cancel,
                         )
                         if finished:
                             video, captions, captions_data = finished
@@ -1697,6 +1725,7 @@ def register_video_dubbing_page(service, shell, studio_action):
                                         on_progress=lambda value, message, **values: update_progress(
                                             0.70 + value * 0.30, message, **values
                                         ),
+                                        cancel_event=operation_cancel,
                                     )
                                     if updated:
                                         await keep_adjustments(latest, fitted)
@@ -1831,7 +1860,12 @@ def register_video_dubbing_page(service, shell, studio_action):
             with ui.card().classes("studio-card w-full gap-3"):
                 with ui.row().classes("w-full items-center justify-between"):
                     ui.label(t("Console de atividades")).classes("text-lg font-semibold")
-                    ui.button(t("Limpar log"), icon="delete_sweep", on_click=clear_activity).props("flat no-caps")
+                    with ui.row().classes("items-center gap-2"):
+                        cancel_button = ui.button(
+                            t("Encerrar processo"), icon="stop_circle", on_click=lambda: cancel_operation()
+                        ).props("outline no-caps color=negative")
+                        cancel_button.set_visibility(False)
+                        ui.button(t("Limpar log"), icon="delete_sweep", on_click=clear_activity).props("flat no-caps")
                 console_progress_label = ui.label(t("Aguardando atividade.")).classes("font-medium")
                 console_progress_bar = ui.linear_progress(value=0).classes("w-full")
                 activity_summary = ui.label().classes("studio-muted")

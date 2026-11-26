@@ -31,15 +31,27 @@ DUB_SAMPLE_RATE = 24000
 SYNC_REVIEW_SPEED = 1.30
 
 
-def _convert(ffmpeg, *arguments, cwd=None):
+def _convert(ffmpeg, *arguments, cwd=None, cancel_event=None):
+    from f5_tts.studio.chatterbox_backend import SynthesisCancelled
+
+    command = [ffmpeg, "-nostdin", "-loglevel", "error", "-y", *map(str, arguments)]
     try:
-        subprocess.run(
-            [ffmpeg, "-nostdin", "-loglevel", "error", "-y", *map(str, arguments)],
-            check=True,
-            capture_output=True,
-            timeout=1800,
-            cwd=cwd,
-        )
+        if cancel_event is None:
+            subprocess.run(command, check=True, capture_output=True, timeout=1800, cwd=cwd)
+        else:
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
+            while True:
+                if cancel_event.is_set():
+                    process.kill()
+                    process.communicate()
+                    raise SynthesisCancelled
+                try:
+                    _, stderr = process.communicate(timeout=0.25)
+                    if process.returncode:
+                        raise subprocess.CalledProcessError(process.returncode, command, stderr=stderr)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
     except subprocess.CalledProcessError as error:
         logging.getLogger(__name__).error("FFmpeg: %s", error.stderr.decode(errors="replace"))
         raise ValueError("Não foi possível processar o vídeo ou a faixa de áudio com FFmpeg.") from error
@@ -156,7 +168,7 @@ def _assign_speakers(embeddings, segments, speaker_count=None, *, profiles=None)
     return [ordered[label] for label in labels]
 
 
-def _extract_original_audio(ffmpeg, source, audio):
+def _extract_original_audio(ffmpeg, source, audio, *, cancel_event=None):
     _convert(
         ffmpeg,
         "-protocol_whitelist",
@@ -175,10 +187,11 @@ def _extract_original_audio(ffmpeg, source, audio):
         "-ar",
         16000,
         audio,
+        cancel_event=cancel_event,
     )
 
 
-def dubbing_stems(service, ffmpeg, source, *, report=None):
+def dubbing_stems(service, ffmpeg, source, *, report=None, cancel_event=None):
     source = Path(source).resolve()
     roots = (service.uploads.resolve(), service.outputs.resolve())
     if not source.is_file() or not any(source.is_relative_to(root) for root in roots):
@@ -209,15 +222,18 @@ def dubbing_stems(service, ffmpeg, source, *, report=None):
             "-ac",
             2,
             track,
+            cancel_event=cancel_event,
         )
-        separated = separate_track(service, track, work, report=report)
+        separated = separate_track(service, track, work, report=report, cancel_event=cancel_event)
         cache.mkdir(exist_ok=True)
         separated[0].replace(vocals)
         separated[1].replace(background)
     return vocals, background
 
 
-def check_vocal_profiles(service, source, segments, *, on_progress=None):
+def check_vocal_profiles(service, source, segments, *, on_progress=None, cancel_event=None):
+    from f5_tts.studio.chatterbox_backend import SynthesisCancelled
+
     source = service.managed_upload(source)
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
@@ -225,11 +241,13 @@ def check_vocal_profiles(service, source, segments, *, on_progress=None):
     results = []
     with tempfile.TemporaryDirectory(prefix="f5-vocal-check-") as folder:
         path = Path(folder) / "original.wav"
-        _extract_original_audio(ffmpeg, source, path)
+        _extract_original_audio(ffmpeg, source, path, cancel_event=cancel_event)
         with sf.SoundFile(path) as audio:
             rate = audio.samplerate
             duration = audio.frames / rate
             for index, row in enumerate(segments, 1):
+                if cancel_event is not None and cancel_event.is_set():
+                    raise SynthesisCancelled
                 start, end = row["start"], row["end"]
                 profile = "unknown"
                 if start is not None and end is not None and 0 <= start < end <= duration + 0.001:
@@ -238,6 +256,8 @@ def check_vocal_profiles(service, source, segments, *, on_progress=None):
                     audio.seek(first)
                     detected = set()
                     while remaining >= rate // 3 and len(detected) < 2:
+                        if cancel_event is not None and cancel_event.is_set():
+                            raise SynthesisCancelled
                         frames = min(4 * rate, remaining)
                         samples = audio.read(frames, dtype="float32")
                         remaining -= frames
@@ -268,8 +288,13 @@ def analyze_video(
     time_range=None,
     use_whisperx=False,
     hf_token="",
+    cancel_event=None,
 ):
+    from f5_tts.studio.chatterbox_backend import SynthesisCancelled
+
     def report(value, message):
+        if cancel_event is not None and cancel_event.is_set():
+            raise SynthesisCancelled
         if on_progress:
             on_progress(value, message)
 
@@ -314,10 +339,11 @@ def analyze_video(
         report(0.08, "Extraindo áudio do vídeo…")
         audio = directory / "original.wav"
         if separate_vocals:
-            vocals, _ = dubbing_stems(service, ffmpeg, source, report=report)
-            _convert(ffmpeg, "-protocol_whitelist", "file", "-i", vocals, "-ac", 1, "-ar", 16000, audio)
+            vocals, _ = dubbing_stems(service, ffmpeg, source, report=report, cancel_event=cancel_event)
+            _convert(ffmpeg, "-protocol_whitelist", "file", "-i", vocals, "-ac", 1, "-ar", 16000, audio,
+                     cancel_event=cancel_event)
         else:
-            _extract_original_audio(ffmpeg, source, audio)
+            _extract_original_audio(ffmpeg, source, audio, cancel_event=cancel_event)
         analysis_audio = audio
         if time_range is not None:
             analysis_audio = directory / "selected.wav"
@@ -334,12 +360,14 @@ def analyze_video(
                 "-ar",
                 16000,
                 analysis_audio,
+                cancel_event=cancel_event,
             )
         diarization_turns = []
         if use_gemini:
             report(0.30, "Preparando o áudio para o Gemini…")
             compressed = directory / "gemini.mp3"
-            _convert(ffmpeg, "-i", analysis_audio, "-c:a", "libmp3lame", "-b:a", "48k", compressed)
+            _convert(ffmpeg, "-i", analysis_audio, "-c:a", "libmp3lame", "-b:a", "48k", compressed,
+                     cancel_event=cancel_event)
             if compressed.stat().st_size > GEMINI_AUDIO_LIMIT:
                 raise ValueError("O áudio excede o limite do Gemini nesta tela. Use um trecho menor ou o Whisper.")
             with wave.open(str(analysis_audio), "rb") as speech:
@@ -385,6 +413,7 @@ def analyze_video(
                 speaker_count,
                 hf_token,
                 report=lambda value, message: report(0.20 + 0.60 * value, message),
+                cancel_event=cancel_event,
             )
             diarization_turns = raw.get("turns", [])
             words = raw.get("segments", [])
@@ -434,6 +463,7 @@ def analyze_video(
                 on_recovery=lambda: report(0.62, "Revisando intervalos sem transcrição…"),
                 short_lines=True,
                 on_review=lambda: report(0.55, "Rechecando falas com palavras repetidas…"),
+                cancel_event=cancel_event,
             )
         if offset:
             segments = [{**row, "start": row["start"] + offset, "end": row["end"] + offset} for row in segments]
@@ -539,9 +569,11 @@ def analyze_video(
 
 def reanalyze_speakers_whisperx(
     service, source, segments, source_language, model_id, *, speaker_count=None, hf_token="",
-    separate_vocals=False, time_range=None, on_progress=None,
+    separate_vocals=False, time_range=None, on_progress=None, cancel_event=None,
 ):
     """Update speaker labels from diarization only; never transcribes or edits dialogue text."""
+    from f5_tts.studio.chatterbox_backend import SynthesisCancelled
+
     source = service.managed_upload(source)
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
@@ -550,22 +582,22 @@ def reanalyze_speakers_whisperx(
     try:
         audio = directory / "audio.wav"
         if separate_vocals:
-            vocals, _ = dubbing_stems(service, ffmpeg, source)
-            _convert(ffmpeg, "-i", vocals, "-ac", 1, "-ar", 16000, audio)
+            vocals, _ = dubbing_stems(service, ffmpeg, source, cancel_event=cancel_event)
+            _convert(ffmpeg, "-i", vocals, "-ac", 1, "-ar", 16000, audio, cancel_event=cancel_event)
         else:
-            _extract_original_audio(ffmpeg, source, audio)
+            _extract_original_audio(ffmpeg, source, audio, cancel_event=cancel_event)
         offset = float(time_range[0]) if time_range else 0.0
         if time_range:
             selected = directory / "selected.wav"
             _convert(ffmpeg, "-ss", f"{offset:.6f}", "-i", audio, "-t", f"{float(time_range[1]) - offset:.6f}",
-                     "-ac", 1, "-ar", 16000, selected)
+                     "-ac", 1, "-ar", 16000, selected, cancel_event=cancel_event)
             audio = selected
         from f5_tts.studio.whisperx_diarization import analyze as analyze_whisperx
 
         result = analyze_whisperx(
             service.home, audio, source_language, model_id, speaker_count, hf_token,
             report=lambda value, message: on_progress(0.1 + 0.9 * value, message) if on_progress else None,
-            diarize_only=True,
+            diarize_only=True, cancel_event=cancel_event,
         )
         turns = result.get("turns", [])
         labels = {}

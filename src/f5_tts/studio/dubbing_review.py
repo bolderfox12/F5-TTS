@@ -247,7 +247,14 @@ class DubbingProject:
         self._files[target.name] = target
         self._cache[key] = (target, duration)
 
-    def _voices(self, requests, on_progress=None, *, gemini_key="", force=False):
+    def _voices(self, requests, on_progress=None, *, gemini_key="", force=False, cancel_event=None):
+        from f5_tts.studio.chatterbox_backend import SynthesisCancelled
+
+        def check_cancelled():
+            if cancel_event is not None and cancel_event.is_set():
+                raise SynthesisCancelled
+
+        check_cancelled()
         if not force:
             for key in dict.fromkeys(requests):
                 cached = self._load_cloud_voice(key)
@@ -298,6 +305,7 @@ class DubbingProject:
                 generated = {}
                 casts = {}
                 for index, key in enumerate(pending):
+                    check_cancelled()
                     model, language, text, reference, transcript = key
                     if model in GEMINI_VOICE_MODELS:
                         output = folder / f"{index}.wav"
@@ -328,6 +336,7 @@ class DubbingProject:
                             language=language,
                             _part_directory=folder,
                             _part_progress=(index, len(pending)),
+                            cancel_event=cancel_event,
                         )
                         generated[key] = Path(entry["path"])
                         self._publish_voice(key, generated[key])
@@ -346,6 +355,7 @@ class DubbingProject:
                             data["settings"]["device"],
                             offline=bool(data.get("offline")),
                             on_progress=lambda count, previous=finished: report(previous + count),
+                            cancel_event=cancel_event,
                         )
                         finished += sum(len(lines) for lines in cast.values())
                         report(finished)
@@ -357,23 +367,23 @@ class DubbingProject:
             service._operation.release()
         return [self._cache[key] for key in requests]
 
-    def regenerate(self, identifier, request, *, on_progress=None, gemini_key=""):
+    def regenerate(self, identifier, request, *, on_progress=None, gemini_key="", cancel_event=None):
         with self._lock:
             key = self._request(identifier, request)
             previous = self._cache.pop(key, None)
             try:
-                return self._voices([key], on_progress, gemini_key=gemini_key, force=True)[0]
+                return self._voices([key], on_progress, gemini_key=gemini_key, force=True, cancel_event=cancel_event)[0]
             except Exception:
                 if previous:
                     self._cache[key] = previous
                 raise
 
-    def prepare(self, lines, *, on_progress=None, gemini_key=""):
+    def prepare(self, lines, *, on_progress=None, gemini_key="", cancel_event=None):
         with self._lock:
             keys = [self._request(line.id, line) for line in lines if line.take_id is None]
-            return self._voices(keys, on_progress, gemini_key=gemini_key)
+            return self._voices(keys, on_progress, gemini_key=gemini_key, cancel_event=cancel_event)
 
-    def fit_preview(self, request, originals, gemini_key, *, on_progress=None):
+    def fit_preview(self, request, originals, gemini_key, *, on_progress=None, cancel_event=None):
         """Keep alternate text only after its synthetic audio fits the video slot."""
         if not any(line.take_id is None for line in request.lines):
             return request
@@ -393,6 +403,7 @@ class DubbingProject:
             ai_lines,
             on_progress=lambda value, message, **values: report(0.05 + 0.25 * value, message, **values),
             gemini_key=key,
+            cancel_event=cancel_event,
         )
         clip_lengths = {line.id: clip[1] for line, clip in zip(ai_lines, voices, strict=True)}
         ceiling = MAX_SPEED if request.auto_speed else 1
@@ -440,6 +451,7 @@ class DubbingProject:
                 on_progress=lambda value, _message, **_values: report(
                     0.60 + (round_index + value) * 0.18, "Conferindo a duração das falas encurtadas…"
                 ),
+                cancel_event=cancel_event,
             )
             for line, (_, duration) in zip(batch, measured, strict=True):
                 if duration < clip_lengths[line.id] and duration / ceiling - slots[line.id] <= 0.001:
@@ -450,16 +462,16 @@ class DubbingProject:
             else request
         )
 
-    def export(self, request, *, preview=False, on_progress=None, gemini_key=""):
+    def export(self, request, *, preview=False, on_progress=None, gemini_key="", cancel_event=None):
         def report(value, message, **values):
             if on_progress:
                 on_progress(value, message, **values)
 
         with self._lock:
             report(0.05, "Conferindo os tempos e o roteiro…")
-            return self._export(request, preview=preview, report=report, gemini_key=gemini_key)
+            return self._export(request, preview=preview, report=report, gemini_key=gemini_key, cancel_event=cancel_event)
 
-    def _background(self, ffmpeg, directory):
+    def _background(self, ffmpeg, directory, *, cancel_event=None):
         output = self.directory / "background.wav"
         if output.is_file():
             return output
@@ -468,9 +480,9 @@ class DubbingProject:
             _convert(ffmpeg, "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", self.duration, silence)
             silence.replace(output)
             return output
-        return dubbing_stems(self.service, ffmpeg, self.source)[1]
+        return dubbing_stems(self.service, ffmpeg, self.source, cancel_event=cancel_event)[1]
 
-    def _export(self, request, *, preview, report, gemini_key=""):
+    def _export(self, request, *, preview, report, gemini_key="", cancel_event=None):
         ffmpeg = shutil.which("ffmpeg")
         if not ffmpeg:
             raise ValueError("Instale o FFmpeg para dublar vídeos.")
@@ -500,6 +512,7 @@ class DubbingProject:
                 keys,
                 lambda value, message, **values: report(0.10 + 0.33 * value, message, **values),
                 gemini_key=gemini_key,
+                cancel_event=cancel_event,
             )
         )
         report(0.46, "Sincronizando as falas com o vídeo…")
@@ -570,7 +583,7 @@ class DubbingProject:
             background_track = None
             if request.background_volume:
                 report(0.53, "Separando música e efeitos do áudio original…")
-                background = self._background(ffmpeg, directory)
+                background = self._background(ffmpeg, directory, cancel_event=cancel_event)
                 inputs.extend(("-i", background))
                 background_track = f"[{len(rows)}:a]aresample=48000,volume={request.background_volume / 100}[bg]"
                 filters.append(background_track)
@@ -593,6 +606,10 @@ class DubbingProject:
                     )
                     tracks.append("[music]")
             report(0.68, "Mixando voz dublada e fundo…")
+            if cancel_event is not None and cancel_event.is_set():
+                from f5_tts.studio.chatterbox_backend import SynthesisCancelled
+
+                raise SynthesisCancelled
             filters.append(
                 f"{''.join(tracks)}amix=inputs={len(tracks)}:normalize=0:dropout_transition=0,"
                 "alimiter=limit=0.89:level=0:latency=1,apad[mix]"
@@ -620,6 +637,7 @@ class DubbingProject:
                 "-b:a",
                 "192k",
                 mixed,
+                cancel_event=cancel_event,
             )
             report(0.88, "Renderizando a prévia dublada…" if preview else "Exportando o vídeo final…")
             identifier = uuid4().hex
@@ -660,6 +678,7 @@ class DubbingProject:
                     "copy",
                     *flags,
                     draft,
+                    cancel_event=cancel_event,
                 )
                 return draft
 

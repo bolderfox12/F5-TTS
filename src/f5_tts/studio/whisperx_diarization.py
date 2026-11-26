@@ -23,9 +23,28 @@ def installed(home):
     return python_path(home).is_file() and (runtime_dir(home) / ".ready").is_file()
 
 
-def _run_install(command):
+def _run_install(command, cancel_event=None):
+    from f5_tts.studio.chatterbox_backend import SynthesisCancelled
+
     try:
-        subprocess.run(command, check=True, capture_output=True, text=True)
+        if cancel_event is None:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+        else:
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            while True:
+                if cancel_event.is_set():
+                    process.kill()
+                    process.communicate()
+                    raise SynthesisCancelled
+                try:
+                    stdout, stderr = process.communicate(timeout=0.25)
+                    if process.returncode:
+                        raise subprocess.CalledProcessError(process.returncode, command, stdout, stderr)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+    except SynthesisCancelled:
+        raise
     except subprocess.CalledProcessError as error:
         detail = (error.stderr or error.stdout or "").strip().splitlines()
         message = detail[-1] if detail else "erro sem detalhes"
@@ -53,7 +72,7 @@ def clear_checkpoint(home, audio, language, model_id, speaker_count=None, *, dia
         pass
 
 
-def install(home, report=None):
+def install(home, report=None, cancel_event=None):
     uv = shutil.which("uv")
     if not uv:
         raise ValueError("Instale o uv para preparar o ambiente isolado do WhisperX.")
@@ -63,17 +82,20 @@ def install(home, report=None):
     if not python.exists():
         if report:
             report("Preparando Python 3.11 isolado para WhisperX…")
-        _run_install([uv, "venv", "--python", "3.11", "--managed-python", str(root / ".venv")])
+        _run_install([uv, "venv", "--python", "3.11", "--managed-python", str(root / ".venv")], cancel_event)
     if report:
         report("Instalando WhisperX estável e diarização pyannote…")
     _run_install(
         [uv, "pip", "install", "--python", str(python), "whisperx==3.8.6"],
+        cancel_event,
     )
     (root / ".ready").touch()
     return python
 
 
-def analyze(home, audio, language, model_id, speaker_count=None, token="", report=None, *, diarize_only=False):
+def analyze(home, audio, language, model_id, speaker_count=None, token="", report=None, *, diarize_only=False, cancel_event=None):
+    from f5_tts.studio.chatterbox_backend import SynthesisCancelled
+
     python = python_path(home)
     if not python.is_file():
         raise ValueError("WhisperX não está instalado. Use o botão Instalar WhisperX nesta tela.")
@@ -127,7 +149,16 @@ def analyze(home, audio, language, model_id, speaker_count=None, token="", repor
     tail = []
     try:
         while True:
-            line = events.get(timeout=7200)
+            if cancel_event is not None and cancel_event.is_set():
+                process.kill()
+                process.wait()
+                raise SynthesisCancelled
+            try:
+                line = events.get(timeout=0.2 if cancel_event is not None else 7200)
+            except queue.Empty:
+                if cancel_event is not None:
+                    continue
+                raise
             if line is None:
                 break
             tail.append(line.strip())
