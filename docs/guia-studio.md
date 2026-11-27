@@ -57,15 +57,6 @@ do Hugging Face. O Chatterbox usa a configuração de dispositivo do Studio e se
 próprios parâmetros de síntese. A transcrição da referência, os passos de inferência
 e a velocidade são usados pelo F5-TTS.
 
-### Fish Speech S2-Pro na dublagem
-
-O S2-Pro pode ser escolhido em **Dublagem por IA**. Ele usa um servidor Fish Speech local
-separado, que precisa estar ativo em `http://127.0.0.1:8080`; veja a
-[instalação e os comandos no README](../README.md#fish-speech-s2-pro-na-dublagem). A referência
-de cada personagem deve ter a transcrição preenchida. A geração usa a API local Fish Speech;
-ela não envia o áudio para a nuvem por padrão. O tamanho de memória de GPU recomendado pelo
-Fish é 24 GB, e placas diferentes não compartilham VRAM automaticamente.
-
 ## Treinamento de voz
 
 Abra **Treinar uma voz** e crie ou selecione um projeto. Para comparar experimentos, mantenha

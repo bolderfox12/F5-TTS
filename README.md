@@ -84,30 +84,6 @@ uv pip check --python .studio/chatterbox/.venv/bin/python
 No Windows, use `.studio/chatterbox/.venv/Scripts/python.exe` nos comandos após `uv venv`.
 Com outro workspace, use a estrutura `<workspace>/chatterbox/.venv`.
 
-### Fish Speech S2-Pro na dublagem
-
-O seletor **Fish Speech S2-Pro** usa um servidor Fish Speech separado em
-`http://127.0.0.1:8080`. Instale o Fish Speech fora deste repositório, com Python 3.12,
-seguindo o [guia oficial de instalação](https://speech.fish.audio/install/) e baixe os pesos
-`fishaudio/s2-pro`. No diretório do Fish Speech, inicie o servidor com:
-
-```bash
-uv sync --python 3.12 --extra cu129
-hf download fishaudio/s2-pro --local-dir checkpoints/s2-pro
-.venv/bin/python tools/api_server.py --listen 127.0.0.1:8080 \
-  --llama-checkpoint-path checkpoints/s2-pro \
-  --decoder-checkpoint-path checkpoints/s2-pro/codec.pth \
-  --decoder-config-name modded_dac_vq
-```
-
-Se o servidor usar outro endereço, configure `F5_FISH_SPEECH_URL` antes de iniciar o Studio.
-Se o servidor foi iniciado com autenticação `--api-key`, configure também
-`F5_FISH_SPEECH_API_KEY` no ambiente do Studio; não salve essa chave em arquivos do repositório.
-O Fish precisa do texto transcrito da referência de voz. O S2-Pro pede pelo menos 24 GB de
-memória de GPU; a memória de duas placas não é somada automaticamente. Leia também a
-[licença do Fish Speech](https://github.com/fishaudio/fish-speech/blob/main/LICENSE), que
-tem termos diferentes da licença MIT deste Studio.
-
 ### Demucs para música e efeitos
 
 O ambiente abaixo foi validado em CPU. O Studio procura o executável em
@@ -135,7 +111,7 @@ o roteiro e os takes são compartilhados ao alternar de modo dentro da sessão a
   e personagem. Ouça e escolha a referência de voz de cada personagem.
 - **Tradução e síntese.** Escolha NLLB local ou Gemini, independentemente do transcritor.
   A dublagem oferece português, inglês, espanhol, francês, alemão, coreano, japonês e mandarim
-  em caracteres simplificados. O Chatterbox, Fish Speech S2-Pro ou um modelo registrado gera as falas. Ouça, edite
+  em caracteres simplificados. O Chatterbox ou um modelo registrado gera as falas. Ouça, edite
   e regenere cada trecho. A compatibilidade de idioma depende do modelo escolhido.
 - **Ajuste de duração.** Os cartões medem quanto a fala excede a janela. O ajuste de velocidade
   da IA vai até **1,30×**. O Gemini pode sugerir expressões mais curtas por fala ou testá-las
