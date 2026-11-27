@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 import soundfile as sf
 from pydantic import BaseModel, Field
 
-from f5_tts.studio import chatterbox_backend as chatterbox, gemini_tts, google_cloud_tts
+from f5_tts.studio import chatterbox_backend as chatterbox, fish_speech_tts, gemini_tts, google_cloud_tts
 from f5_tts.studio.adr_audio import HUMAN_TREATMENT, Take, save_take
 from f5_tts.studio.dubbing_transcript import repeated_text
 from f5_tts.studio.script_review import shorten_dubbing_line
@@ -182,7 +182,9 @@ class DubbingProject:
         if identifier not in self.rows:
             raise ValueError("Esta fala não pertence ao projeto.")
         if request.language not in chatterbox.LANGUAGES or (
-            request.model not in GEMINI_VOICE_MODELS and request.model not in self.service.model_choices()
+            request.model not in GEMINI_VOICE_MODELS
+            and request.model != fish_speech_tts.MODEL_ID
+            and request.model not in self.service.model_choices()
         ):
             raise ValueError("Escolha um modelo e idioma válidos para a dublagem.")
         if request.model == "original" and request.language not in {"en", "zh"}:
@@ -320,6 +322,14 @@ class DubbingProject:
                         finally:
                             self._active_cloud_voice = None
                             self.voice_revision += 1
+                        finished += 1
+                        report(finished)
+                    elif model == fish_speech_tts.MODEL_ID:
+                        output = self._voice_cache_path(key)
+                        fish_speech_tts.synthesize(
+                            text, reference, transcript, output, cancel_event=cancel_event
+                        )
+                        self._publish_voice(key, output)
                         finished += 1
                         report(finished)
                     elif model == chatterbox.MODEL_ID:

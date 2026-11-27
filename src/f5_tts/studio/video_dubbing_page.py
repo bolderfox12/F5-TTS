@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 
 from nicegui import app, ui
 
-from f5_tts.studio import chatterbox_backend as chatterbox, gemini_tts, google_cloud_tts
+from f5_tts.studio import chatterbox_backend as chatterbox, fish_speech_tts, gemini_tts, google_cloud_tts
 from f5_tts.studio.audio_cleanup import audio_cleanup_handoff_url
 from f5_tts.studio.adr_panel import take_panel
 from f5_tts.studio.adr_recorder import ADRRecorder
@@ -927,6 +927,7 @@ def register_video_dubbing_page(service, shell, studio_action):
                     output_model = ui.select(
                         {
                             **service.model_choices(),
+                            fish_speech_tts.MODEL_ID: t(fish_speech_tts.MODEL_NAME),
                             gemini_tts.MODEL_ID: t("Gemini TTS · vozes expressivas"),
                             google_cloud_tts.MODEL_ID: t("Google Cloud Text-to-Speech"),
                         },
@@ -936,6 +937,15 @@ def register_video_dubbing_page(service, shell, studio_action):
                 ui.label(t("Gemini TTS envia a fala traduzida e a direção de voz ao Google.")).classes(
                     "studio-muted"
                 ).bind_visibility_from(output_model, "value", lambda value: value == gemini_tts.MODEL_ID)
+                ui.label(
+                    t(
+                        "Fish Speech S2-Pro roda em um servidor local separado. Inicie-o na porta 8080; "
+                        "configure F5_FISH_SPEECH_URL e, se necessário, F5_FISH_SPEECH_API_KEY. "
+                        "A referência de voz precisa ter o texto transcrito."
+                    )
+                ).classes("studio-muted").bind_visibility_from(
+                    output_model, "value", lambda value: value == fish_speech_tts.MODEL_ID
+                )
                 with (
                     ui.row()
                     .classes("w-full items-center")
